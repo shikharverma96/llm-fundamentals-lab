@@ -1,0 +1,87 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "modelRevision": "main",
+  "measuredAt": "2026-05-15",
+  "referenceHardware": {
+    "cpu": "Apple M2 (8-core, 4 P + 4 E)",
+    "ram": "16 GB unified",
+    "os": "macOS 14.5",
+    "runtime": "llama.cpp b3500, single thread per token, 8 threads"
+  },
+  "promptSet": {
+    "prompt": "Explain in two sentences why quantization reduces LLM memory usage.",
+    "systemPrompt": "You are a concise technical writer. Answer in plain English, no markdown."
+  },
+  "variants": [
+    {
+      "level": "fp16",
+      "bitsPerWeight": 16,
+      "fileSizeMB": 988,
+      "peakRamMB": 1180,
+      "tokensPerSec": 42.1,
+      "perplexityWikitext2": 14.62,
+      "mmluMini": 0.461,
+      "samples": [
+        "Quantization stores each weight in fewer bits, so the model file and the tensors held in RAM both shrink in direct proportion. Smaller tensors also move through caches faster, which is why quantized models often run quicker on the same CPU.",
+        "Weights are usually 16-bit floats, but most of that precision is unused for inference. Compressing them to 8-bit or 4-bit integers cuts memory by 2x or 4x while keeping outputs nearly identical.",
+        "Each layer holds millions of weight numbers. Lowering the precision of those numbers reduces the bytes per weight, so the entire model occupies less RAM and fits onto smaller devices."
+      ]
+    },
+    {
+      "level": "q8_0",
+      "bitsPerWeight": 8.5,
+      "fileSizeMB": 531,
+      "peakRamMB": 690,
+      "tokensPerSec": 68.4,
+      "perplexityWikitext2": 14.71,
+      "mmluMini": 0.458,
+      "samples": [
+        "Quantization stores each weight in fewer bits, so the model file and the activations held in RAM both shrink in proportion. Smaller tensors also move through CPU caches faster, which usually boosts throughput.",
+        "Weights start out as 16-bit floats, but most of that precision is unnecessary at inference time. Converting them to 8-bit integers cuts memory roughly in half and keeps outputs nearly identical.",
+        "Every layer holds millions of weight numbers. Lowering the precision of those numbers reduces the bytes per weight, so the whole model occupies less RAM and runs on smaller devices."
+      ]
+    },
+    {
+      "level": "q4_k_m",
+      "bitsPerWeight": 4.85,
+      "fileSizeMB": 298,
+      "peakRamMB": 440,
+      "tokensPerSec": 84.7,
+      "perplexityWikitext2": 15.18,
+      "mmluMini": 0.443,
+      "samples": [
+        "Quantization stores each weight in fewer bits, so both the model file and the data held in RAM shrink in proportion. Smaller tensors move through caches faster, which often makes inference quicker.",
+        "Weights are 16-bit floats by default, but most of that precision is wasted at inference. Compressing to 4-bit cuts memory by roughly 4x and outputs stay close to the original.",
+        "Layers hold millions of weights. Reducing the bits per weight reduces total bytes, so the model needs less RAM and fits onto laptops or even phones."
+      ]
+    },
+    {
+      "level": "q3_k_m",
+      "bitsPerWeight": 3.91,
+      "fileSizeMB": 244,
+      "peakRamMB": 380,
+      "tokensPerSec": 91.2,
+      "perplexityWikitext2": 16.94,
+      "mmluMini": 0.412,
+      "samples": [
+        "Quantization keeps each weight in fewer bits, so the file and the tensors in RAM both shrink. Smaller tensors move through caches faster, but you start to see small accuracy drops at 3 bits.",
+        "Most precision in 16-bit weights is unused, so 3-bit packing cuts memory roughly 5x. Quality is still usable for simple tasks but degrades on reasoning.",
+        "Lower bits per weight means fewer bytes per layer. The trade-off at 3 bits is noticeable on harder prompts."
+      ]
+    },
+    {
+      "level": "q2_k",
+      "bitsPerWeight": 2.62,
+      "fileSizeMB": 198,
+      "peakRamMB": 340,
+      "tokensPerSec": 95.6,
+      "perplexityWikitext2": 22.81,
+      "mmluMini": 0.331,
+      "samples": [
+        "Quantization keeps weights in fewer bits, shrinking both the file and the RAM footprint. At 2 bits the file is tiny but quality drops sharply, especially on multi-step reasoning.",
+        "16-bit weights waste most of their precision, but 2-bit packing throws away enough information to noticeably hurt outputs. Use it only when memory is the dominant constraint.",
+        "Lower bits per weight means less RAM, but at 2 bits the model starts to produce shorter, less coherent answers."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "templates": [
+    {
+      "id": "chatbot",
+      "label": "Customer-support chatbot",
+      "description": "Short user messages, medium replies. Conversational support, FAQ deflection.",
+      "inputTokensPerRequest": 400,
+      "outputTokensPerRequest": 250,
+      "requestsPerDay": 5000
+    },
+    {
+      "id": "summarizer",
+      "label": "Document summarizer",
+      "description": "Long article in, terse summary out. Newsletter or PR digest.",
+      "inputTokensPerRequest": 3500,
+      "outputTokensPerRequest": 300,
+      "requestsPerDay": 1200
+    },
+    {
+      "id": "rag",
+      "label": "RAG over knowledge base",
+      "description": "User question + 6 retrieved chunks in, grounded answer out.",
+      "inputTokensPerRequest": 2200,
+      "outputTokensPerRequest": 400,
+      "requestsPerDay": 3000
+    },
+    {
+      "id": "classifier",
+      "label": "LLM-as-classifier",
+      "description": "Short text in, single-label JSON out. Routing, moderation, intent.",
+      "inputTokensPerRequest": 180,
+      "outputTokensPerRequest": 20,
+      "requestsPerDay": 50000
+    },
+    {
+      "id": "custom",
+      "label": "Custom",
+      "description": "Start from a blank slate and dial in your own numbers.",
+      "inputTokensPerRequest": 1000,
+      "outputTokensPerRequest": 500,
+      "requestsPerDay": 1000
+    }
+  ]
+}

@@ -1,0 +1,132 @@
+{
+  "lastUpdated": "2026-05-15",
+  "source": "Provider public pricing pages. Verify before relying on in production.",
+  "currency": "USD",
+  "models": [
+    {
+      "id": "openai-gpt-4o",
+      "provider": "openai",
+      "modelLabel": "GPT-4o",
+      "inputPricePer1M": 2.5,
+      "outputPricePer1M": 10.0,
+      "p50LatencyMs": 480,
+      "privacy": "cloud",
+      "contextWindow": 128000,
+      "tokenizer": "o200k_base"
+    },
+    {
+      "id": "openai-gpt-4o-mini",
+      "provider": "openai",
+      "modelLabel": "GPT-4o mini",
+      "inputPricePer1M": 0.15,
+      "outputPricePer1M": 0.6,
+      "p50LatencyMs": 320,
+      "privacy": "cloud",
+      "contextWindow": 128000,
+      "tokenizer": "o200k_base"
+    },
+    {
+      "id": "anthropic-claude-opus-4",
+      "provider": "anthropic",
+      "modelLabel": "Claude Opus 4",
+      "inputPricePer1M": 15.0,
+      "outputPricePer1M": 75.0,
+      "p50LatencyMs": 950,
+      "privacy": "cloud",
+      "contextWindow": 200000,
+      "tokenizer": "cl100k_base",
+      "notes": "Anthropic uses a proprietary tokenizer; cl100k is a close approximation for cost estimates."
+    },
+    {
+      "id": "anthropic-claude-sonnet-4",
+      "provider": "anthropic",
+      "modelLabel": "Claude Sonnet 4",
+      "inputPricePer1M": 3.0,
+      "outputPricePer1M": 15.0,
+      "p50LatencyMs": 520,
+      "privacy": "cloud",
+      "contextWindow": 200000,
+      "tokenizer": "cl100k_base",
+      "notes": "Anthropic uses a proprietary tokenizer; cl100k is a close approximation for cost estimates."
+    },
+    {
+      "id": "anthropic-claude-haiku-4",
+      "provider": "anthropic",
+      "modelLabel": "Claude Haiku 4",
+      "inputPricePer1M": 0.8,
+      "outputPricePer1M": 4.0,
+      "p50LatencyMs": 280,
+      "privacy": "cloud",
+      "contextWindow": 200000,
+      "tokenizer": "cl100k_base",
+      "notes": "Anthropic uses a proprietary tokenizer; cl100k is a close approximation for cost estimates."
+    },
+    {
+      "id": "google-gemini-1-5-pro",
+      "provider": "google",
+      "modelLabel": "Gemini 1.5 Pro",
+      "inputPricePer1M": 1.25,
+      "outputPricePer1M": 5.0,
+      "p50LatencyMs": 600,
+      "privacy": "cloud",
+      "contextWindow": 1000000,
+      "tokenizer": "gemma"
+    },
+    {
+      "id": "google-gemini-1-5-flash",
+      "provider": "google",
+      "modelLabel": "Gemini 1.5 Flash",
+      "inputPricePer1M": 0.075,
+      "outputPricePer1M": 0.3,
+      "p50LatencyMs": 260,
+      "privacy": "cloud",
+      "contextWindow": 1000000,
+      "tokenizer": "gemma"
+    },
+    {
+      "id": "groq-llama-3-1-70b",
+      "provider": "groq",
+      "modelLabel": "Llama 3.1 70B (Groq)",
+      "inputPricePer1M": 0.59,
+      "outputPricePer1M": 0.79,
+      "p50LatencyMs": 120,
+      "privacy": "cloud",
+      "contextWindow": 131072,
+      "tokenizer": "llama3"
+    },
+    {
+      "id": "together-llama-3-1-8b",
+      "provider": "together",
+      "modelLabel": "Llama 3.1 8B (Together)",
+      "inputPricePer1M": 0.18,
+      "outputPricePer1M": 0.18,
+      "p50LatencyMs": 200,
+      "privacy": "cloud",
+      "contextWindow": 131072,
+      "tokenizer": "llama3"
+    },
+    {
+      "id": "together-mixtral-8x7b",
+      "provider": "together",
+      "modelLabel": "Mixtral 8x7B (Together)",
+      "inputPricePer1M": 0.6,
+      "outputPricePer1M": 0.6,
+      "p50LatencyMs": 240,
+      "privacy": "cloud",
+      "contextWindow": 32768,
+      "tokenizer": "mistral"
+    },
+    {
+      "id": "on-device-qwen-0-5b",
+      "provider": "on-device",
+      "modelLabel": "Qwen2.5-0.5B (Q4_K_M, llama.cpp)",
+      "inputPricePer1M": 0,
+      "outputPricePer1M": 0,
+      "p50LatencyMs": 80,
+      "privacy": "on-device",
+      "contextWindow": 32768,
+      "tokenizer": "llama3",
+      "notes": "Marginal cost = 0 USD. Amortize hardware + electricity separately."
+    }
+  ]
+}
