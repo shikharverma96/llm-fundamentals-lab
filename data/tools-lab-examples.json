@@ -1,0 +1,126 @@
+{
+  "examples": [
+    {
+      "id": "search-good",
+      "name": "search_docs",
+      "description": "Full-text search the project documentation corpus and return up to N matching passages with source URLs. Use this when the user asks about API behavior, configuration, or any factual question about the documented product. Idempotent. Does not modify state.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Natural-language query." },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5 }
+        },
+        "required": ["query"]
+      },
+      "verdict": "good",
+      "rationale": "Verb-led name, single responsibility, explicit idempotency, bounded result count, clear when-to-use guidance in the description."
+    },
+    {
+      "id": "search-bad",
+      "name": "do_search",
+      "description": "Searches things.",
+      "schema": { "type": "object", "properties": { "q": { "type": "string" } } },
+      "verdict": "bad",
+      "rationale": "Vague name, useless description, no when-to-use, no bound on result size, cryptic param name (q vs query), no idempotency statement."
+    },
+    {
+      "id": "transfer-good",
+      "name": "transfer_funds",
+      "description": "Move money between two accounts. NON-IDEMPOTENT and IRREVERSIBLE — the caller MUST first confirm with the user. Requires an explicit idempotency_key from the caller; calls with a repeated key return the original result without re-charging.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "from_account_id": { "type": "string" },
+          "to_account_id": { "type": "string" },
+          "amount_cents": { "type": "integer", "minimum": 1 },
+          "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+          "idempotency_key": { "type": "string", "minLength": 8 }
+        },
+        "required": [
+          "from_account_id",
+          "to_account_id",
+          "amount_cents",
+          "currency",
+          "idempotency_key"
+        ]
+      },
+      "verdict": "good",
+      "rationale": "Loud about irreversibility, requires idempotency_key, currency pattern constrained, integer cents avoids float rounding."
+    },
+    {
+      "id": "transfer-bad",
+      "name": "send_money",
+      "description": "Sends money. Use this to send money.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "amount": { "type": "number" },
+          "to": { "type": "string" }
+        }
+      },
+      "verdict": "bad",
+      "rationale": "Float amount risks rounding, no source account, no currency, no idempotency, no warning about irreversibility. Model will call this confidently and wrongly."
+    },
+    {
+      "id": "duplicate-overlap-a",
+      "name": "lookup_user",
+      "description": "Look up a user by id.",
+      "schema": {
+        "type": "object",
+        "properties": { "user_id": { "type": "string" } },
+        "required": ["user_id"]
+      },
+      "verdict": "bad",
+      "rationale": "Overlaps with get_user below. Two near-identical tools → model picks randomly. Pick one, delete the other."
+    },
+    {
+      "id": "duplicate-overlap-b",
+      "name": "get_user",
+      "description": "Gets a user record.",
+      "schema": {
+        "type": "object",
+        "properties": { "id": { "type": "string" } },
+        "required": ["id"]
+      },
+      "verdict": "bad",
+      "rationale": "Functionally identical to lookup_user — and disagrees on param name. Classic 'tool registry sprawl' pitfall."
+    }
+  ],
+  "pitfalls": [
+    {
+      "id": "vague-desc",
+      "title": "Vague descriptions",
+      "body": "If you can't explain in one sentence WHEN to use this tool over the others, the model can't either. Lead with the verb, end with the constraint (idempotent / requires confirmation / read-only / etc)."
+    },
+    {
+      "id": "overlap",
+      "title": "Overlapping tools",
+      "body": "Two tools with similar descriptions force the model to guess. Worse than one slightly-suboptimal tool. Consolidate or differentiate sharply."
+    },
+    {
+      "id": "huge-registry",
+      "title": "Oversized registries",
+      "body": "Past ~30 tools, models start to forget. Group by domain and route through a 'pick a domain first' supervisor instead of dumping all 80 tools into context."
+    },
+    {
+      "id": "loose-schemas",
+      "title": "Loose schemas",
+      "body": "Free-text params get free-text values. Enums, patterns, integer-vs-number, minLength on ids — every constraint is a class of bug the harness catches, not the model."
+    },
+    {
+      "id": "silent-sideeffects",
+      "title": "Silent side effects",
+      "body": "If the tool writes, mark it in the description: 'WRITE', 'IRREVERSIBLE', 'SENDS EMAIL'. The model is dramatically more careful when told. Don't hide it under a friendly name like 'finalize'."
+    },
+    {
+      "id": "no-error-shape",
+      "title": "No structured errors",
+      "body": "Tool returns 'oops' as a plain string. Model treats it as data, builds the next step on top of the apology. Always return { ok: false, error: '…' } or set is_error:true."
+    },
+    {
+      "id": "result-too-big",
+      "title": "Unbounded result size",
+      "body": "Tool returns 200 KB. Half gets truncated. Model answers from the first half, confident and wrong. Cap at the tool layer; offer a follow-up tool for pagination."
+    }
+  ]
+}

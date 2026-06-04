@@ -1,0 +1,88 @@
+{
+  "moduleId": "patterns",
+  "moduleLabel": "Anthropic Agent Patterns",
+  "intro": "From the Anthropic 'Building Effective Agents' guide. Each pattern is a separate solution shape — pick the simplest one that does the job. Do not reach for the plain agent loop when a 30-line prompt chain would do.",
+  "items": [
+    {
+      "id": "chaining",
+      "title": "Prompt chaining",
+      "whenToUse": "The task decomposes into a fixed, ordered sequence of sub-steps. No branching.",
+      "mechanism": "Output of LLM call N becomes input to LLM call N+1. Optional gates between steps (regex match, validator) catch derailment early.",
+      "tradeoff": "Cheap, deterministic, easy to debug. Brittle if task shape varies. Always your first try."
+    },
+    {
+      "id": "routing",
+      "title": "Routing",
+      "whenToUse": "Distinct sub-categories of input each need different downstream handling (different prompts, models, or tools).",
+      "mechanism": "Classifier LLM (small/cheap) emits one of N labels. Each label maps to a specialized handler.",
+      "tradeoff": "Concentrates the hard model spend where it matters. Adds one extra hop of latency. The /ask page itself is a routing pattern."
+    },
+    {
+      "id": "parallelization",
+      "title": "Parallelization (sectioning + voting)",
+      "whenToUse": "Sectioning: independent sub-problems run in parallel. Voting: same problem N times with different prompts; majority wins.",
+      "mechanism": "Fan-out → parallel LLM calls → aggregate. Sectioning aggregates by concat; voting aggregates by tally or judge.",
+      "tradeoff": "Wall-clock latency drops. Cost multiplies. Voting buys robustness on borderline classifications at N× cost."
+    },
+    {
+      "id": "orchestrator-workers",
+      "title": "Orchestrator-workers",
+      "whenToUse": "Task structure is dynamic and only known at run time (e.g. 'change every file that references X').",
+      "mechanism": "Orchestrator LLM plans sub-tasks at run time and dispatches each to a worker. Workers report back; orchestrator synthesizes.",
+      "tradeoff": "Flexible but slow and expensive. Easy to misuse — try chaining or routing first."
+    },
+    {
+      "id": "evaluator-optimizer",
+      "title": "Evaluator-optimizer",
+      "whenToUse": "Iterative refinement against measurable quality (translation polish, code that must compile).",
+      "mechanism": "Generator LLM produces output → evaluator LLM (or program) critiques → generator revises. Loop until evaluator approves or max-iter.",
+      "tradeoff": "Quality climbs visibly. Cost is N× a single call. Evaluator must be sharper than generator on the dimension being graded — otherwise it just rubber-stamps."
+    },
+    {
+      "id": "agent-loop",
+      "title": "Plain agent loop",
+      "whenToUse": "Open-ended task with unpredictable steps and tool use (research, coding, browsing).",
+      "mechanism": "Think → tool → observe → repeat. Covered in depth in Module F.",
+      "tradeoff": "Maximum flexibility, maximum cost, maximum failure surface. The pattern of last resort, not first."
+    },
+    {
+      "id": "interleaved-thinking",
+      "title": "Extended thinking with tools",
+      "whenToUse": "Tasks where reasoning between tool calls is load-bearing (math, multi-hop research, planning).",
+      "mechanism": "Enable extended-thinking on Sonnet/Opus. Model emits thinking blocks between each tool call, visible in the trace.",
+      "tradeoff": "Fewer, deeper steps. Higher per-step cost. Reduces total step count enough to often pay for itself."
+    }
+  ],
+  "pitfalls": [
+    {
+      "id": "agent-first",
+      "title": "Reaching for the agent loop first",
+      "body": "A 200-line agent loop replaced what a 20-line prompt chain would have done. Always try the simpler pattern first — agent loops are expensive and hard to debug."
+    },
+    {
+      "id": "voting-without-diversity",
+      "title": "Voting without diversity",
+      "body": "Running the same prompt 5× at the same temperature gets 5 nearly-identical answers. For voting to work, vary prompts, models, or temperatures meaningfully."
+    },
+    {
+      "id": "evaluator-too-soft",
+      "title": "Evaluator that rubber-stamps",
+      "body": "If the evaluator is the same model + same prompt as the generator, it will approve almost everything. Use a different model, a checklist, or a programmatic check."
+    },
+    {
+      "id": "orchestrator-runaway",
+      "title": "Orchestrator runaway",
+      "body": "Orchestrator keeps decomposing sub-tasks into sub-sub-tasks. Cap recursion depth + budget per dispatch."
+    },
+    {
+      "id": "no-pattern-clarity",
+      "title": "Hybrid soup",
+      "body": "A single agent that 'routes, plans, calls tools, and self-critiques' is impossible to debug. Compose patterns by chaining them, not by collapsing them into one prompt."
+    }
+  ],
+  "artifact": {
+    "kind": "code",
+    "language": "typescript",
+    "content": "// Each pattern in ~30 lines — see Building Effective Agents.\nimport Anthropic from '@anthropic-ai/sdk';\nconst client = new Anthropic();\nconst MODEL = 'claude-sonnet-4-5';\n\nasync function llm(prompt: string, system?: string) {\n  const r = await client.messages.create({\n    model: MODEL,\n    max_tokens: 1024,\n    system,\n    messages: [{ role: 'user', content: prompt }],\n  });\n  return r.content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('');\n}\n\n// 1. Chaining\nexport async function chain(input: string) {\n  const a = await llm(`Outline a blog post about: ${input}`);\n  if (!a.includes('-')) throw new Error('Outline gate failed');\n  const b = await llm(`Draft the post from this outline:\\n${a}`);\n  return llm(`Polish for tone and grammar:\\n${b}`);\n}\n\n// 2. Routing\nexport async function route(query: string) {\n  const label = (await llm(\n    `Classify the query into one of: billing | tech | general.\\nQuery: ${query}\\nReturn only the label.`,\n  )).trim().toLowerCase();\n  if (label === 'billing') return llm(query, 'You are a billing specialist.');\n  if (label === 'tech') return llm(query, 'You are a senior engineer.');\n  return llm(query);\n}\n\n// 3. Parallelization (voting)\nexport async function vote(prompt: string) {\n  const variants = await Promise.all([0.3, 0.7, 1.0].map(t =>\n    client.messages.create({ model: MODEL, max_tokens: 512, temperature: t, messages: [{ role: 'user', content: prompt }] }),\n  ));\n  const answers = variants.map(v => v.content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join(''));\n  return llm(`Three candidate answers:\\n${answers.map((a, i) => `(${i + 1}) ${a}`).join('\\n')}\\nReturn the best one.`);\n}\n\n// 4. Orchestrator-workers\nexport async function orchestrate(goal: string) {\n  const plan = JSON.parse(await llm(\n    `Goal: ${goal}\\nReturn a JSON array of independent sub-tasks. Format: [{\\\"id\\\": string, \\\"task\\\": string}]`,\n  ));\n  const results = await Promise.all(plan.map((s: { task: string }) => llm(s.task)));\n  return llm(`Synthesize a final answer from these sub-results:\\n${results.join('\\n---\\n')}`);\n}\n\n// 5. Evaluator-optimizer\nexport async function evalLoop(prompt: string, max = 3) {\n  let draft = await llm(prompt);\n  for (let i = 0; i < max; i++) {\n    const verdict = await llm(`Grade this draft on accuracy + clarity. Return PASS or REVISE: <why>.\\nDraft:\\n${draft}`);\n    if (verdict.startsWith('PASS')) return draft;\n    draft = await llm(`Revise the draft using this feedback:\\n${verdict}\\n\\nOriginal:\\n${draft}`);\n  }\n  return draft;\n}"
+  }
+}

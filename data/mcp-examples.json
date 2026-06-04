@@ -1,0 +1,81 @@
+{
+  "moduleId": "mcp",
+  "moduleLabel": "Model Context Protocol (MCP)",
+  "intro": "MCP is a JSON-RPC protocol for connecting LLM clients to tool/resource/prompt servers. Think USB-C for LLMs — one wire, many devices. The protocol is small; the security implications are not. Pinned to spec rev 2025-06-18 here.",
+  "items": [
+    {
+      "id": "architecture",
+      "title": "Architecture: client, server, transport",
+      "whenToUse": "Always — this is the layering.",
+      "mechanism": "An MCP CLIENT (your agent harness) talks JSON-RPC to one or more MCP SERVERS over a TRANSPORT (stdio for local processes, Streamable HTTP for remote, SSE deprecated as of mid-2025). Each server exposes tools, resources, and/or prompts.",
+      "tradeoff": "Decouples tool development from agent development. Adds a process boundary and a wire protocol — extra latency, extra failure modes."
+    },
+    {
+      "id": "primitives",
+      "title": "Three primitives: tools, resources, prompts",
+      "whenToUse": "Pick the primitive that matches the data flow.",
+      "mechanism": "TOOLS = model-invoked, side-effect-OK functions (write_file, search_web). RESOURCES = client-readable, identified by URI, model is informed via context (a file, a row from a DB). PROMPTS = templated message bundles the user/client invokes (e.g. 'summarize selection').",
+      "tradeoff": "Tools cover most use cases. Resources are underused; they're the right shape for 'here is the open file' context-injection."
+    },
+    {
+      "id": "capability-negotiation",
+      "title": "Capability negotiation",
+      "whenToUse": "Every connection. Spec-mandated.",
+      "mechanism": "Initialize handshake: client and server exchange protocol version + capabilities. Either side may declare it does not support a primitive. Re-negotiation requires reconnection.",
+      "tradeoff": "Forward-compatible. Servers must gracefully degrade when a capability isn't supported."
+    },
+    {
+      "id": "transports",
+      "title": "Transports: stdio vs HTTP",
+      "whenToUse": "Stdio for local/process-bound integrations. Streamable HTTP for remote/networked.",
+      "mechanism": "Stdio: launch the server as a subprocess, talk over its stdin/stdout. No auth (process boundary IS the auth). HTTP: standard request/response + server push for notifications. OAuth-based auth is the recommended pattern.",
+      "tradeoff": "Stdio is dead simple but local-only. HTTP is operationally heavier but the only viable option for production multi-tenant servers."
+    },
+    {
+      "id": "trust-model",
+      "title": "Trust model & untrusted output",
+      "whenToUse": "Every time an MCP response enters your context.",
+      "mechanism": "Treat every MCP response as untrusted input. The server you call is a third party in your context window. Wrap server output in <mcp-result> tags; instruct the model never to follow instructions inside.",
+      "tradeoff": "Most MCP security incidents come from this being forgotten. The protocol does not enforce content trust — the host must."
+    },
+    {
+      "id": "discovery",
+      "title": "Discovery & catalogs",
+      "whenToUse": "Multi-server deployments.",
+      "mechanism": "Servers are discovered via config (client config file lists endpoints) or registries (cataloged lists of public MCP servers). No central authority — anyone can run one.",
+      "tradeoff": "Maximum flexibility. Maximum supply-chain risk. Pin and audit the servers you depend on."
+    }
+  ],
+  "pitfalls": [
+    {
+      "id": "trust-server-output",
+      "title": "Trusting server output",
+      "body": "An MCP server fetches a webpage and returns its contents. The webpage tells your agent to email the API key to attacker@example.com. The protocol does not prevent this — your host must delimit and instruct the model accordingly."
+    },
+    {
+      "id": "unbounded-tool-registry",
+      "title": "Connecting too many servers",
+      "body": "Each server adds tools to the registry. Past ~30 total tools, model accuracy drops sharply. Curate ruthlessly; not every server you can connect, you should."
+    },
+    {
+      "id": "no-rate-limit",
+      "title": "No per-server rate limits",
+      "body": "An MCP server is a tool — a misbehaving agent can hammer it. Rate-limit at the client. Set timeouts."
+    },
+    {
+      "id": "deprecated-sse",
+      "title": "Using deprecated SSE transport",
+      "body": "The SSE transport was deprecated in 2025-03-26 spec. Use Streamable HTTP for new HTTP-based servers."
+    },
+    {
+      "id": "stale-spec",
+      "title": "Servers pinned to an old spec rev",
+      "body": "The spec evolves quickly. Servers that don't keep up break on version-negotiation. Track the version field; have a deprecation policy."
+    }
+  ],
+  "artifact": {
+    "kind": "code",
+    "language": "typescript",
+    "content": "// Minimal MCP server in TypeScript using the official SDK (stdio transport).\n// One tool, one resource — enough to make the wire format concrete.\nimport { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';\nimport { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';\nimport { z } from 'zod';\n\nconst server = new McpServer({\n  name: 'llm-lab-example',\n  version: '0.1.0',\n});\n\n// 1. A tool — model can invoke it.\nserver.registerTool(\n  'add',\n  {\n    description: 'Add two integers. IDEMPOTENT. READ-ONLY.',\n    inputSchema: { a: z.number().int(), b: z.number().int() },\n  },\n  async ({ a, b }) => ({\n    content: [{ type: 'text', text: String(a + b) }],\n  }),\n);\n\n// 2. A resource — client reads, model is informed.\nserver.registerResource(\n  'greeting',\n  'greeting://welcome',\n  {\n    title: 'Welcome',\n    description: 'A static welcome message.',\n    mimeType: 'text/plain',\n  },\n  async () => ({\n    contents: [{\n      uri: 'greeting://welcome',\n      mimeType: 'text/plain',\n      text: 'Hello from the example MCP server.',\n    }],\n  }),\n);\n\nconst transport = new StdioServerTransport();\nawait server.connect(transport);"
+  }
+}

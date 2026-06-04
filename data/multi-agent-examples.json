@@ -1,0 +1,88 @@
+{
+  "moduleId": "multi-agent",
+  "moduleLabel": "Multi-Agent Topologies",
+  "intro": "Multi-agent isn't magic — it's a way to slice the problem so each piece fits in one model's context and capability. The slice shape (the topology) controls cost, latency, observability, and failure modes. Most 'multi-agent' systems are actually one of six shapes.",
+  "items": [
+    {
+      "id": "supervisor",
+      "title": "Supervisor",
+      "whenToUse": "Heterogeneous tasks where a routing decision drives downstream specialization. The pattern this /ask page uses.",
+      "mechanism": "Lightweight supervisor classifies the request and hands off to one of N specialists. Each specialist has its own tools + system prompt.",
+      "tradeoff": "One extra hop of latency. Concentrates intelligence cost on the work, not the routing. Easy to debug because handoffs are explicit."
+    },
+    {
+      "id": "swarm",
+      "title": "Swarm",
+      "whenToUse": "Long-running collaborative tasks where any agent can pick up where another left off.",
+      "mechanism": "Shared task queue, any agent may pop. Each can hand off to a named peer mid-task. State lives in the queue, not in any one agent.",
+      "tradeoff": "Resilient, parallel. Hard to reason about who's doing what; observability is non-trivial."
+    },
+    {
+      "id": "pipeline",
+      "title": "Pipeline",
+      "whenToUse": "Tasks with a fixed processing order: extract → transform → critique → publish.",
+      "mechanism": "Output of agent N is input to agent N+1. Often the simplest 'multi-agent' system is really a multi-stage pipeline.",
+      "tradeoff": "Trivial to debug, predictable cost. Adds no resilience over a single-agent chain — it's just chaining."
+    },
+    {
+      "id": "hierarchical",
+      "title": "Hierarchical",
+      "whenToUse": "Big tasks decomposed into sub-tasks, each of which may itself need decomposition.",
+      "mechanism": "Manager agent dispatches to sub-managers, who dispatch to workers. Results bubble up.",
+      "tradeoff": "Scales to large tasks. Recursion depth must be bounded or cost explodes. Inter-level handoff is the hard part."
+    },
+    {
+      "id": "debate",
+      "title": "Debate",
+      "whenToUse": "Tasks where a robust answer benefits from adversarial review (legal analysis, security review, code review).",
+      "mechanism": "Two or more agents argue different sides. A judge agent picks a winner or synthesizes.",
+      "tradeoff": "Surfaces edge cases a single agent misses. Slow and expensive. Diverge the agents on prompt or model — same model + same prompt = no debate."
+    },
+    {
+      "id": "blackboard",
+      "title": "Blackboard",
+      "whenToUse": "Open-ended problems with many possible contributors and unclear ordering.",
+      "mechanism": "Shared blackboard (write-only structured store). Each agent watches for triggers, writes its contribution. Optional controller schedules.",
+      "tradeoff": "Maximally flexible. Maximally hard to operate. Reserve for problems where you genuinely can't define the topology up front."
+    },
+    {
+      "id": "subagent-delegation",
+      "title": "Subagent delegation (context isolation)",
+      "whenToUse": "When the parent agent's context window is the bottleneck — long horizon, dirty intermediate state, exploratory sub-tasks.",
+      "mechanism": "Parent spawns a child agent with a fresh context to do a bounded sub-task. Child returns a compressed result. Parent never sees the intermediate state. Exactly the Claude Code `Task` pattern.",
+      "tradeoff": "Different motivation from the other topologies above — here the goal is context HYGIENE, not specialization. Pay one round-trip to keep the parent's context clean."
+    }
+  ],
+  "pitfalls": [
+    {
+      "id": "multi-agent-for-multi-agent-sake",
+      "title": "Multi-agent when one would do",
+      "body": "Three agents that could be one prompt chain. Multi-agent multiplies cost + complexity; reach for it when one model's window or capability becomes the bottleneck."
+    },
+    {
+      "id": "shared-state-races",
+      "title": "Shared-state races",
+      "body": "Swarm and blackboard topologies invite write races. Either serialize through a queue or design idempotent writes."
+    },
+    {
+      "id": "no-observability",
+      "title": "Inscrutable handoffs",
+      "body": "If you can't trace 'this answer came from agent A → B → C with these arguments at each hop', you cannot debug it. Build SSE-style trace from day one."
+    },
+    {
+      "id": "infinite-handoff",
+      "title": "Infinite handoff loops",
+      "body": "Agent A hands to B, B hands back to A, A hands to B again. Track handoff chain depth; abort beyond a small cap (3–5)."
+    },
+    {
+      "id": "homogeneous-debate",
+      "title": "Debate without divergence",
+      "body": "Two instances of the same model debate and quickly converge. Use different models, different roles, or different system prompts."
+    }
+  ],
+  "artifact": {
+    "kind": "code",
+    "language": "typescript",
+    "content": "// Supervisor + worker hand-off interface — minimal contract.\nimport Anthropic from '@anthropic-ai/sdk';\n\nexport interface Worker {\n  id: string;\n  blurb: string;\n  systemPrompt: string;\n  tools: Anthropic.Tool[];\n}\n\nexport interface SupervisorDecision {\n  workerId: string;\n  reason: string;\n}\n\nexport async function supervise(\n  client: Anthropic,\n  question: string,\n  workers: Worker[],\n): Promise<SupervisorDecision> {\n  const res = await client.messages.create({\n    model: 'claude-haiku-4-5-20251001',\n    max_tokens: 256,\n    system: 'Route the user question to exactly one worker.',\n    tools: [{\n      name: 'route',\n      description: 'Pick the best worker.',\n      input_schema: {\n        type: 'object',\n        properties: {\n          worker_id: { type: 'string', enum: workers.map(w => w.id) },\n          reason: { type: 'string' },\n        },\n        required: ['worker_id', 'reason'],\n      },\n    }],\n    tool_choice: { type: 'tool', name: 'route' },\n    messages: [{\n      role: 'user',\n      content: `Workers:\\n${workers.map(w => `- ${w.id}: ${w.blurb}`).join('\\n')}\\n\\nQuestion: ${question}`,\n    }],\n  });\n  const tu = res.content.find(b => b.type === 'tool_use');\n  if (!tu || tu.type !== 'tool_use') throw new Error('No routing decision');\n  const { worker_id, reason } = tu.input as { worker_id: string; reason: string };\n  return { workerId: worker_id, reason };\n}"
+  }
+}

@@ -1,0 +1,169 @@
+{
+  "trace": {
+    "title": "Single-agent loop · research task",
+    "task": "Find the population of the three largest cities in Japan and return them as a JSON object.",
+    "steps": [
+      {
+        "step": 0,
+        "agent": "researcher",
+        "kind": "thinking",
+        "content": "I need three largest Japanese cities by population. I'll search, then fetch each city's population, then assemble JSON.",
+        "latencyMs": 410,
+        "tokens": { "input": 1820, "output": 56 }
+      },
+      {
+        "step": 1,
+        "agent": "researcher",
+        "kind": "tool_call",
+        "content": "web_search({ query: 'largest cities in Japan by population' })",
+        "tool": {
+          "name": "web_search",
+          "args": { "query": "largest cities in Japan by population" }
+        },
+        "latencyMs": 120,
+        "tokens": { "input": 0, "output": 24 }
+      },
+      {
+        "step": 2,
+        "agent": "researcher",
+        "kind": "tool_result",
+        "content": "Top results: Tokyo, Yokohama, Osaka.",
+        "tool": {
+          "name": "web_search",
+          "result": [
+            {
+              "title": "List of cities in Japan by population",
+              "snippet": "Tokyo · Yokohama · Osaka · Nagoya · Sapporo"
+            }
+          ]
+        },
+        "latencyMs": 820,
+        "tokens": { "input": 0, "output": 0 }
+      },
+      {
+        "step": 3,
+        "agent": "researcher",
+        "kind": "tool_call",
+        "content": "lookup_population({ city: 'Tokyo' })",
+        "tool": { "name": "lookup_population", "args": { "city": "Tokyo" } },
+        "latencyMs": 95,
+        "tokens": { "input": 0, "output": 14 }
+      },
+      {
+        "step": 4,
+        "agent": "researcher",
+        "kind": "tool_result",
+        "content": "13,960,000 (2024).",
+        "tool": {
+          "name": "lookup_population",
+          "result": { "city": "Tokyo", "population": 13960000, "year": 2024 }
+        },
+        "latencyMs": 310,
+        "tokens": { "input": 0, "output": 0 }
+      },
+      {
+        "step": 5,
+        "agent": "researcher",
+        "kind": "tool_call",
+        "content": "lookup_population({ city: 'Yokohama' })",
+        "tool": { "name": "lookup_population", "args": { "city": "Yokohama" } },
+        "latencyMs": 88,
+        "tokens": { "input": 0, "output": 14 }
+      },
+      {
+        "step": 6,
+        "agent": "researcher",
+        "kind": "tool_result",
+        "content": "3,770,000 (2024).",
+        "tool": {
+          "name": "lookup_population",
+          "result": { "city": "Yokohama", "population": 3770000, "year": 2024 }
+        },
+        "latencyMs": 305,
+        "tokens": { "input": 0, "output": 0 }
+      },
+      {
+        "step": 7,
+        "agent": "researcher",
+        "kind": "tool_call",
+        "content": "lookup_population({ city: 'Osaka' })",
+        "tool": { "name": "lookup_population", "args": { "city": "Osaka" } },
+        "latencyMs": 90,
+        "tokens": { "input": 0, "output": 14 }
+      },
+      {
+        "step": 8,
+        "agent": "researcher",
+        "kind": "tool_result",
+        "content": "2,750,000 (2024).",
+        "tool": {
+          "name": "lookup_population",
+          "result": { "city": "Osaka", "population": 2750000, "year": 2024 }
+        },
+        "latencyMs": 290,
+        "tokens": { "input": 0, "output": 0 }
+      },
+      {
+        "step": 9,
+        "agent": "researcher",
+        "kind": "thinking",
+        "content": "All three populations retrieved. Assembling JSON object as requested.",
+        "latencyMs": 220,
+        "tokens": { "input": 2310, "output": 30 }
+      },
+      {
+        "step": 10,
+        "agent": "researcher",
+        "kind": "final",
+        "content": "{ \"Tokyo\": 13960000, \"Yokohama\": 3770000, \"Osaka\": 2750000 }",
+        "latencyMs": 180,
+        "tokens": { "input": 0, "output": 32 }
+      }
+    ],
+    "finalAnswer": "{ \"Tokyo\": 13960000, \"Yokohama\": 3770000, \"Osaka\": 2750000 }",
+    "totals": {
+      "steps": 11,
+      "tokensIn": 4130,
+      "tokensOut": 184,
+      "latencyMs": 2928
+    }
+  },
+  "gotchas": [
+    {
+      "id": "no-max-iter",
+      "title": "Missing max-iter cap",
+      "symptom": "Agent loops indefinitely when a tool keeps returning ambiguous results — burns budget, eventually times out.",
+      "fix": "Hard cap iterations (e.g. 8–12). On hit, emit an explicit 'max-iter' error step and return partial state instead of looping further."
+    },
+    {
+      "id": "parse-fail-no-fallback",
+      "title": "No JSON-parse fallback",
+      "symptom": "Model returns a tool call with malformed JSON args; loop crashes instead of recovering.",
+      "fix": "Wrap arg parsing in try/catch. On parse failure, feed the error back as a tool_result so the model can self-correct on the next turn."
+    },
+    {
+      "id": "tool-result-truncation",
+      "title": "Tool result silently truncated",
+      "symptom": "A large tool result is cut at 4KB, model reads partial data and answers wrong, with high confidence.",
+      "fix": "Truncate explicitly with a visible '[truncated: N more bytes]' marker. Better: paginate via a follow-up tool call (`page_token`)."
+    },
+    {
+      "id": "unbounded-context",
+      "title": "Unbounded conversation context",
+      "symptom": "After 30+ steps, latency and cost balloon; relevant early facts get displaced by late noise.",
+      "fix": "Compact every N steps: summarize older tool results, keep IDs/references, drop verbose payloads. Cache breakpoints on the system prompt + tool defs to amortize."
+    },
+    {
+      "id": "tool-error-as-text",
+      "title": "Tool errors returned as plain text",
+      "symptom": "A 500 from `lookup_population` is appended as a normal tool_result; model treats the error string as data and hallucinates around it.",
+      "fix": "Distinguish error from success in the tool_result envelope (`{ ok: false, error: '...' }`). Model is far better at handling structured errors than free-text apology strings."
+    },
+    {
+      "id": "premature-final",
+      "title": "Model declares done too early",
+      "symptom": "After getting Tokyo only, model emits the final answer claiming all three are 'roughly the same'.",
+      "fix": "Validate the final answer against the task requirements before accepting. If schema-validated, the parse failure forces another loop turn."
+    }
+  ]
+}

@@ -1,0 +1,281 @@
+{
+  "query": "What was our Q3 revenue?",
+  "sampleDocument": "Acme Robotics reported third-quarter revenue of $42.8 million for the period ending September 30, up 18 percent year over year and ahead of consensus estimates of $40.1 million. Growth was driven primarily by the Industrial Automation segment, which contributed $26.4 million, a 24 percent increase, as factory customers ramped deployment of the new RX-7 mobile manipulator platform. The Consumer Robotics segment grew more modestly, with $11.2 million in revenue, up 8 percent year over year; management attributed the slower growth to channel inventory normalization at two large retail partners following a strong second quarter. Services revenue, which includes installation, training, and recurring maintenance contracts, reached $5.2 million, a 41 percent increase, reflecting both new attach rates above 60 percent on Industrial deals and renewals from the 2023 deployment cohort. Gross margin expanded 220 basis points to 47.1 percent on improved component sourcing and higher mix of services revenue. Operating expenses of $14.6 million were up 11 percent, below the rate of revenue growth, producing operating income of $5.6 million versus $2.1 million in the year-ago period. Free cash flow was $4.1 million for the quarter and $11.3 million year to date. The company raised its full-year revenue guidance to $168-172 million from a prior range of $160-165 million and now expects full-year operating margin of approximately 12.5 percent. Management noted that deferred revenue increased to $18.9 million, a leading indicator for the Services segment, and that the sales pipeline for Industrial Automation entering Q4 was the largest in company history at $94 million of weighted opportunity. Risks called out on the earnings call included extended decision cycles among mid-market industrial customers, exposure to a single supplier of high-resolution depth sensors that the company is actively second-sourcing, and continued FX headwinds in EMEA where the company derives roughly 22 percent of revenue. The CFO confirmed that share-based compensation would remain in the 7 to 8 percent of revenue range for the foreseeable future and that the existing $50 million buyback authorization had $31 million remaining as of quarter end.",
+  "pipeline": [
+    {
+      "id": "ingest",
+      "title": "Ingest",
+      "oneLiner": "Convert source files to clean, structured text.",
+      "what": "Pull from the source (PDF, HTML, Notion, Drive, SharePoint), extract text, preserve structure (headings, tables, lists), strip boilerplate (headers, footers, nav), and capture metadata (source URL, author, timestamp, page number, section).",
+      "example": "The Q3 earnings PDF arrives as a 12-page document. A naive text dump loses the columns. We use a layout-aware parser (pdfplumber, unstructured, or LlamaParse) to recover the table of segment revenues as actual rows and the prose paragraphs separately.",
+      "pitfall": "Scanned PDFs need OCR (Tesseract, Azure Document Intelligence). Tables flattened to text lose row/column meaning. Images with embedded numbers (charts) require a vision model or are silently dropped.",
+      "tools": ["unstructured.io", "LlamaParse", "pdfplumber", "Apache Tika", "Tesseract OCR"]
+    },
+    {
+      "id": "chunk",
+      "title": "Chunk",
+      "oneLiner": "Split text into retrieval-sized pieces with overlap.",
+      "what": "Break the document into chunks that fit the embedding model context (typically 256-1024 tokens), respecting natural boundaries (headings, paragraphs, sentences). Add overlap (10-20 percent) so concepts spanning a boundary survive. Keep source metadata on every chunk.",
+      "example": "The earnings paragraph is split into three ~150-token chunks. Chunk A covers total Q3 revenue and segment breakdown. Chunk B covers gross margin and operating leverage. Chunk C covers guidance and risks. Each chunk carries: { source: 'q3-earnings.pdf', page: 1, section: 'Results' }.",
+      "pitfall": "Fixed character chunking splits sentences and proper nouns. Semantic chunkers can drift on noisy documents. No overlap creates a 'cliff' where a fact straddling the boundary becomes unretrievable.",
+      "tools": [
+        "LangChain RecursiveCharacterTextSplitter",
+        "LlamaIndex SentenceSplitter",
+        "semantic-chunkers",
+        "Unstructured chunk_by_title"
+      ]
+    },
+    {
+      "id": "embed",
+      "title": "Embed",
+      "oneLiner": "Turn each chunk into a dense vector.",
+      "what": "Pass each chunk through an embedding model to produce a 384-3072 dimensional vector. Vectors that capture similar meaning end up close in cosine space. Pick one model and stick with it for the entire corpus and all queries.",
+      "example": "Chunk A about Q3 revenue becomes a 1536-dim vector with text-embedding-3-small. The query 'What was our Q3 revenue?' becomes a different 1536-dim vector. Their cosine similarity is ~0.82 — high.",
+      "pitfall": "Mixing embedding models across the corpus is fatal: distances become meaningless. Tiny models (gte-small, 384d) are fast and cheap but lose nuance on technical jargon. Cross-lingual queries need a multilingual model.",
+      "tools": [
+        "OpenAI text-embedding-3-small/large",
+        "Cohere embed-v3",
+        "gte-small / bge-small",
+        "Voyage AI",
+        "nomic-embed-text"
+      ]
+    },
+    {
+      "id": "index",
+      "title": "Index",
+      "oneLiner": "Store vectors in a structure built for nearest-neighbor search.",
+      "what": "Insert vectors into a vector store with an approximate nearest neighbor (ANN) index — HNSW for high recall and quick queries, IVF for huge corpora and tunable recall/latency. Store the original text and metadata alongside.",
+      "example": "All 14,000 chunks land in pgvector with an HNSW index (m=16, ef_construction=64). Metadata columns (tenant_id, source, page) allow filtered search. For multi-tenant SaaS, row-level security enforces tenant isolation at the database layer.",
+      "pitfall": "Treating the vector store as a write-once dump. Reality: you need versioning, dedup, and a re-index path when the chunking strategy changes. Forgetting tenant filters leaks data across customers.",
+      "tools": ["pgvector", "Qdrant", "Pinecone", "Weaviate", "Milvus", "LanceDB", "Vespa"]
+    },
+    {
+      "id": "retrieve",
+      "title": "Retrieve",
+      "oneLiner": "Embed the query and pull the top-K similar chunks.",
+      "what": "Embed the user query with the same model. Run ANN search for top-K (typically 20-50). Combine with sparse retrieval (BM25) for keyword precision — this is hybrid search. Apply metadata filters (date range, source, tenant). Consider query expansion (HyDE, multi-query) when the query is short or vague.",
+      "example": "The query 'What was our Q3 revenue?' retrieves top-20 chunks. Dense search surfaces Chunk A (revenue) and B (margin). BM25 catches a chunk mentioning 'revenue' in a footnote that dense missed. Reciprocal Rank Fusion (RRF) merges both lists.",
+      "pitfall": "Trusting top-1 alone. Embedding a 4-word query verbatim is often too sparse — expand with HyDE (have the LLM draft a hypothetical answer, embed that). Forgetting metadata filters returns last year's Q3 results.",
+      "tools": [
+        "pgvector + tsvector hybrid",
+        "Qdrant + BM25",
+        "Elasticsearch + dense",
+        "Vespa",
+        "Reciprocal Rank Fusion",
+        "HyDE"
+      ]
+    },
+    {
+      "id": "rerank",
+      "title": "Rerank",
+      "oneLiner": "Use a cross-encoder to re-score the top-K down to top-N.",
+      "what": "Bi-encoders (used for retrieval) embed query and doc independently — fast but lossy. Cross-encoders (used for reranking) jointly attend to (query, doc) and produce a much sharper relevance score. Apply to top-20 to get top-3 to top-5 that go into the prompt.",
+      "example": "Top-20 from retrieval includes a chunk about Q3 of the prior year — high lexical overlap but wrong date. bge-reranker-v2-m3 sees both query and chunk together, scores it low, and Chunk A (current Q3) rises to position 1.",
+      "pitfall": "Reranking is slow per chunk — keep K (input) small (10-30) and N (output) tiny (3-5). Skipping reranking is the single biggest quality regression in production RAG.",
+      "tools": [
+        "Cohere Rerank v3",
+        "bge-reranker-v2-m3",
+        "jina-reranker",
+        "Voyage rerank",
+        "ColBERT (late interaction)"
+      ]
+    },
+    {
+      "id": "assemble",
+      "title": "Assemble prompt",
+      "oneLiner": "Build a prompt that forces grounded, cited answers.",
+      "what": "Compose a system instruction ('Answer ONLY from the sources below'), then a Sources block with each chunk numbered [#1], [#2] including source metadata, then the user question. Truncate to fit the context window leaving headroom for the answer.",
+      "example": "System: 'Answer using ONLY the provided sources. Cite every claim with [#N]. If the sources do not contain the answer, say so.' Sources: [#1] q3-earnings.pdf, p.1: 'Acme Robotics reported third-quarter revenue of $42.8 million...' User: 'What was our Q3 revenue?'",
+      "pitfall": "Putting the question before the sources — models attend more to recency. Stuffing 50 chunks — 'lost in the middle' is real, the model ignores positions 5+. Forgetting citation markers makes verification impossible.",
+      "tools": [
+        "LangChain PromptTemplate",
+        "LlamaIndex CitationQueryEngine",
+        "raw f-strings with care"
+      ]
+    },
+    {
+      "id": "generate",
+      "title": "Generate + resolve citations",
+      "oneLiner": "Call the LLM, then map [#N] back to the source chunks.",
+      "what": "Stream the LLM's answer. Parse out [#1], [#2] markers and resolve them to chunk metadata (source, page, snippet). Render inline citations in the UI as clickable links to the source. Track which chunks were actually cited vs. provided — uncited chunks are a signal that K is too high.",
+      "example": "LLM responds: 'Q3 revenue was $42.8 million [#1], up 18 percent year over year [#1].' We resolve [#1] to q3-earnings.pdf page 1 and render it as a footnote in the UI.",
+      "pitfall": "Trusting the model to invent citations — some models will fabricate [#N] for chunks you did not provide. Always validate that every cited N exists in the sources you sent.",
+      "tools": [
+        "OpenAI streaming API",
+        "Anthropic citations API",
+        "instructor / json mode for structured citations"
+      ]
+    },
+    {
+      "id": "confidence",
+      "title": "Confidence + honest-offline gate",
+      "oneLiner": "Refuse rather than hallucinate when retrieval is weak.",
+      "what": "Compute a confidence signal: max rerank score, mean of top-N, count of cited chunks, presence of 'I don't know' fallback in the answer. If all signals are weak, return 'I cannot answer this from the available sources' instead of a confident guess.",
+      "example": "User asks 'What was Q4 revenue?' Top rerank score is 0.21 (vs. typical 0.75+). Confidence floor not met — system returns 'Q4 results are not in the provided documents.' instead of extrapolating.",
+      "pitfall": "Confidence thresholds need tuning per corpus and per reranker — pick them with an eval set, not vibes. A confidence floor without an escalation path (ask a human, suggest a search) frustrates users.",
+      "tools": [
+        "custom thresholding",
+        "Ragas faithfulness score",
+        "TruLens groundedness",
+        "DSPy assertions"
+      ]
+    }
+  ],
+  "dos": [
+    {
+      "title": "Attach source metadata to every chunk",
+      "reason": "Citations, filtering, audits, and re-indexing all depend on knowing where a chunk came from. Add it at ingest time, not as an afterthought."
+    },
+    {
+      "title": "Use hybrid retrieval (dense + BM25)",
+      "reason": "Dense catches paraphrase; sparse catches exact terms (SKUs, error codes, proper nouns). Fuse with Reciprocal Rank Fusion. The lift is consistent across domains."
+    },
+    {
+      "title": "Evaluate with a reference Q/A set",
+      "reason": "Build 50-200 question/answer pairs from your real corpus. Track recall@k, MRR, and faithfulness on every change. Vibes do not scale past three changes."
+    },
+    {
+      "title": "Rerank top-K to top-N",
+      "reason": "Retrieve 20-30, rerank to 3-5. The cross-encoder catches the off-topic chunks that high cosine similarity let through, and 'lost in the middle' is mitigated."
+    },
+    {
+      "title": "Cite inline with resolvable markers",
+      "reason": "[#1], [#2] tied to sources lets users verify and lets you measure groundedness automatically. No citations means no trust."
+    },
+    {
+      "title": "Set a confidence floor",
+      "reason": "Below threshold, refuse. 'I do not know' is a feature. Without it, you ship confident hallucinations."
+    },
+    {
+      "title": "Log the retrieval audit trail",
+      "reason": "Store query, embedded query, retrieved chunks, rerank scores, final prompt, response, and citations. You cannot debug what you did not log."
+    },
+    {
+      "title": "Version your chunking strategy",
+      "reason": "Chunk size, overlap, splitter, and embedder are a tuple. Version it. When you change any of them, re-index everything and bump the version."
+    },
+    {
+      "title": "Pin one embedding model per corpus",
+      "reason": "Distances are only meaningful within a single embedding space. Migrating models requires a full re-embed — plan and budget for it."
+    }
+  ],
+  "donts": [
+    {
+      "title": "Chunk by character count blindly",
+      "reason": "Splits mid-sentence and mid-proper-noun. Use recursive splitters that respect paragraph and sentence boundaries first, then fall back to characters."
+    },
+    {
+      "title": "Embed short or vague queries verbatim",
+      "reason": "'What about Q3?' has almost no signal. Expand with HyDE (LLM drafts a hypothetical answer, you embed that) or multi-query rewriting."
+    },
+    {
+      "title": "Trust top-1 similarity alone",
+      "reason": "Cosine similarity is not relevance. A high score on an off-topic chunk is common. Always rerank, or at minimum take top-3 and let the LLM choose."
+    },
+    {
+      "title": "Skip deduplication",
+      "reason": "Duplicate chunks (boilerplate, near-duplicates from re-uploads) crowd the top-K and waste context. MinHash or simhash at ingest pays for itself."
+    },
+    {
+      "title": "Mix embedding models across the corpus",
+      "reason": "Vectors from different models live in different spaces — distances are nonsense. If you must migrate, do it atomically and re-embed all of it."
+    },
+    {
+      "title": "Forget chunk-level RLS in multi-tenant systems",
+      "reason": "A single missed filter and Tenant B sees Tenant A's documents. Enforce it at the database (pgvector + row-level security) not at the application."
+    },
+    {
+      "title": "Treat RAG as a silver bullet for reasoning",
+      "reason": "RAG fixes knowledge gaps; it does not fix arithmetic, planning, or multi-hop reasoning. Pair with tools (code interpreter, calculator) and agentic loops when the task needs more than lookup."
+    },
+    {
+      "title": "Cache aggressively without invalidation",
+      "reason": "Caching answers by query string is fine until the corpus changes. Tie cache keys to corpus version, embedding model, and prompt template — and invalidate on re-index."
+    }
+  ],
+  "pitfalls": [
+    {
+      "name": "Lost in the middle",
+      "symptom": "When the prompt contains 10+ chunks, the model's answer reflects only chunks 1-3 and the last one. Middle chunks are ignored.",
+      "fix": "Rerank to 3-5 chunks. If you need more context, summarize middle chunks before insertion. Order by rerank score descending."
+    },
+    {
+      "name": "Embedding drift",
+      "symptom": "Recall collapses overnight. Investigation shows query embeddings used a different model than the corpus (e.g. someone upgraded text-embedding-ada-002 to text-embedding-3-small for queries only).",
+      "fix": "Pin the embedding model in config, version it, and assert at startup that the model used for queries matches the model stamped on the index."
+    },
+    {
+      "name": "Cliff at chunk boundaries",
+      "symptom": "Questions whose answer spans two adjacent paragraphs fail. Each chunk has only half the answer and neither scores well.",
+      "fix": "Add 10-20 percent overlap between chunks. Prefer semantic or structural splitters that break on paragraphs rather than mid-sentence."
+    },
+    {
+      "name": "Topic dilution",
+      "symptom": "Chunks of 1500+ tokens cover three topics each. Similarity scores blur — every chunk looks moderately relevant to everything.",
+      "fix": "Shrink chunks to 200-500 tokens. If you need more context for the LLM, retrieve small and expand by fetching neighboring chunks at assembly time."
+    },
+    {
+      "name": "Confident wrong",
+      "symptom": "When retrieval misses, the model writes a fluent, confident, completely fabricated answer.",
+      "fix": "Require citations in the system prompt. Reject responses without [#N] markers. Add a confidence floor: below it, return 'not in the sources'."
+    },
+    {
+      "name": "Stale corpus",
+      "symptom": "Answers are correct for the date the index was built and silently wrong afterward.",
+      "fix": "Schedule re-ingest. Add 'as of' metadata to every chunk. Make the answer surface the source date. Monitor freshness in your eval set."
+    }
+  ],
+  "checklist": [
+    {
+      "group": "Privacy and security",
+      "items": [
+        "Row-level security or strict tenant filters on every retrieval query",
+        "PII redaction at ingest for fields that should never enter embeddings",
+        "Encrypted vector store at rest; TLS in transit",
+        "Audit log of who queried what and which chunks were surfaced",
+        "Right-to-delete: deletion propagates to chunks, embeddings, and caches"
+      ]
+    },
+    {
+      "group": "Evaluation harness",
+      "items": [
+        "Reference Q/A set of 50-200 pairs from real users",
+        "Automated recall@k, MRR, nDCG on every chunking or embedding change",
+        "Faithfulness and answer-relevance scores (Ragas, TruLens)",
+        "Regression suite gated in CI before any retrieval config ships",
+        "Periodic human spot-check on a sampled 20 answers per week"
+      ]
+    },
+    {
+      "group": "Monitoring",
+      "items": [
+        "p50/p95/p99 latency per stage (embed, retrieve, rerank, generate)",
+        "Retrieval miss rate (no chunk above threshold) trended over time",
+        "Citation coverage: percent of answers with at least one resolved citation",
+        "Honest-offline rate: percent of refusals; alert on sudden moves",
+        "Index freshness: time since last successful re-ingest"
+      ]
+    },
+    {
+      "group": "Cost tracking",
+      "items": [
+        "Per-query cost: embed + rerank + LLM generation, tagged by tenant",
+        "Index cost: storage GB and ANN compute per million vectors",
+        "Re-embed cost budgeted before any embedding-model migration",
+        "Cache hit rate on identical or near-identical queries",
+        "Cost per resolved citation as a quality-adjusted unit"
+      ]
+    },
+    {
+      "group": "Latency budgets",
+      "items": [
+        "Total p95 under 2s for chat-style RAG (stream first token sooner)",
+        "Embed query: under 50ms (small model, warm cache)",
+        "Vector search: under 100ms at p95 for corpora under 10M vectors",
+        "Rerank top-20: under 200ms (cross-encoder on GPU)",
+        "Stream the LLM — never block for the full answer"
+      ]
+    }
+  ],
+  "mermaid": "flowchart LR\n  Q[User Query] --> E[Embed Query]\n  E --> V[(Vector DB)]\n  V --> K[Top-K Candidates]\n  K --> R[Cross-Encoder Rerank]\n  R --> P[Prompt + Sources]\n  P --> L[LLM]\n  L --> A[Answer + Citations]\n  C[Corpus] --> I[Ingest] --> CH[Chunk] --> EM[Embed Chunks] --> V"
+}

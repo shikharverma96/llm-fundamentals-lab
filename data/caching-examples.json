@@ -1,0 +1,81 @@
+{
+  "moduleId": "caching",
+  "moduleLabel": "Prompt Caching",
+  "intro": "Anthropic prompt caching gives ~90% discount on cached input tokens. For agents — where the system prompt + tool definitions are huge and re-sent every step — caching reshapes the cost math. Done well, you'll pay for context once per session, not once per turn.",
+  "items": [
+    {
+      "id": "how-it-works",
+      "title": "How it works",
+      "whenToUse": "Anytime your prompt has a stable prefix repeated across calls.",
+      "mechanism": "Mark cache_control: { type: 'ephemeral' } at one or more positions in your system / tools / messages. The platform hashes everything UP TO that marker; on the next call with the same prefix, you pay 10% for the cached portion + full price only for what's new.",
+      "tradeoff": "First call writes the cache (slightly more expensive than uncached). Subsequent hits within the TTL pay the discount."
+    },
+    {
+      "id": "ttl",
+      "title": "TTL: 5 minutes or 1 hour",
+      "whenToUse": "Choose by your traffic shape.",
+      "mechanism": "5-minute default. 1-hour available (beta header). After TTL, cache is gone — next call re-writes. Cache hit requires byte-identical prefix.",
+      "tradeoff": "5m fits bursty agent traffic. 1h fits sparse, repeated workflows (long-running agents, daily batch jobs)."
+    },
+    {
+      "id": "breakpoint-placement",
+      "title": "Breakpoint placement — the 4-marker pattern",
+      "whenToUse": "Every agent loop call.",
+      "mechanism": "Place markers at: (1) end of system prompt, (2) end of tool definitions, (3) end of conversation up through the previous turn, (4) just before the latest user/tool-result message. Markers cumulate — each marks a cumulative-prefix cache point.",
+      "tradeoff": "Maximum reuse. The latest turn is never cached because it's the new content. As the conversation grows, breakpoint (3) keeps absorbing more."
+    },
+    {
+      "id": "math",
+      "title": "The economics",
+      "whenToUse": "Before deciding to wire caching.",
+      "mechanism": "If your agent makes N tool-loop calls per session with a P-token static prefix, total static-prefix cost without caching = N * P * price_in. With caching: P * 1.25 (write) + (N-1) * P * 0.10 * price_in. Break-even at N=2 in almost all cases.",
+      "tradeoff": "Any agent that loops at all benefits. The longer the system + tool defs, the larger the savings — easily 70–85% off input on long agent runs."
+    },
+    {
+      "id": "invalidation",
+      "title": "Invalidation traps",
+      "whenToUse": "Whenever you edit system / tools.",
+      "mechanism": "Cache key is byte-identical prefix. A whitespace change, a tool description edit, a model bump — all invalidate. Coordinate edits to maximize cache reuse.",
+      "tradeoff": "Treat cached prefixes as immutable contracts. Version them; don't bikeshed copy."
+    },
+    {
+      "id": "what-cant-be-cached",
+      "title": "What can't be cached",
+      "whenToUse": "Understand the limits.",
+      "mechanism": "The CURRENT turn's user content is never cached. Tool RESULTS are part of the new content. Cache works on PREFIXES, not arbitrary spans.",
+      "tradeoff": "Frame your loop so the cacheable parts (system, tools, prior turns) come before the new parts (current user message, current tool result)."
+    }
+  ],
+  "pitfalls": [
+    {
+      "id": "no-breakpoint",
+      "title": "Forgetting the marker",
+      "body": "Caching is opt-in. Without cache_control on at least one position, you pay full price every turn even though the prefix is identical."
+    },
+    {
+      "id": "system-bikeshedding",
+      "title": "System-prompt bikeshedding",
+      "body": "Every tweak invalidates the cache for every running session. Pin the wording, version it like an API."
+    },
+    {
+      "id": "wrong-position",
+      "title": "Marker at end of conversation",
+      "body": "Marker at the end of CURRENT user message → caches nothing useful (no future call has that exact prefix). Marker goes BEFORE volatile content."
+    },
+    {
+      "id": "tool-volatility",
+      "title": "Volatile tool definitions",
+      "body": "Tool definitions that include dynamic data (current time, user's row) invalidate every call. Move dynamic data out of tool DEFS into tool RESULTS."
+    },
+    {
+      "id": "minimum-prefix",
+      "title": "Prefix below minimum",
+      "body": "Anthropic requires cached blocks to meet a token minimum (1024 for Sonnet, 2048 for Opus as of writing). Tiny prefixes can't be cached — group them."
+    }
+  ],
+  "artifact": {
+    "kind": "code",
+    "language": "typescript",
+    "content": "// Cache-breakpoint placement in an agent-loop call.\nimport Anthropic from '@anthropic-ai/sdk';\n\nconst client = new Anthropic();\n\nexport async function cachedAgentTurn(\n  systemPrompt: string,\n  toolDefs: Anthropic.Tool[],\n  priorMessages: Anthropic.MessageParam[],\n  newUserContent: Anthropic.MessageParam,\n) {\n  return client.messages.create({\n    model: 'claude-sonnet-4-5',\n    max_tokens: 2048,\n    // (1) System with cache marker — entire system prompt is cached up to here.\n    system: [\n      {\n        type: 'text',\n        text: systemPrompt,\n        cache_control: { type: 'ephemeral' },\n      },\n    ],\n    // (2) Tool defs — Anthropic caches them implicitly along with the system\n    // when cache_control sits on the system block. For explicit control, mark\n    // the last tool's input_schema with cache_control as well.\n    tools: toolDefs,\n    // (3) Prior conversation: mark the LAST message of the prior list with\n    // cache_control. Each subsequent call extends the cache to one more turn.\n    messages: [\n      ...priorMessages.map((m, i) =>\n        i === priorMessages.length - 1\n          ? {\n              ...m,\n              content:\n                typeof m.content === 'string'\n                  ? [{ type: 'text' as const, text: m.content, cache_control: { type: 'ephemeral' } }]\n                  : m.content,\n            }\n          : m,\n      ),\n      // (4) New content: never cached, by design.\n      newUserContent,\n    ],\n  });\n}"
+  }
+}

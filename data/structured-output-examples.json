@@ -1,0 +1,74 @@
+{
+  "moduleId": "structured-output",
+  "moduleLabel": "Structured Outputs",
+  "intro": "Getting reliable JSON out of a model is a different skill from getting good prose. Three production techniques cover ~95% of cases, with sharply different reliability and latency profiles. Pick by the cost of a single parse failure in your system.",
+  "items": [
+    {
+      "id": "tool-as-extractor",
+      "title": "Tool-as-extractor",
+      "whenToUse": "Default. Highest reliability for medium-complex schemas.",
+      "mechanism": "Define a tool whose schema IS your output shape. tool_choice forces the model to call it. The tool handler simply receives the args, validates, returns them.",
+      "tradeoff": "Native API support, schema enforced at the wire. Slight overhead vs JSON mode. Works on every Anthropic/OpenAI/Gemini model that supports tools."
+    },
+    {
+      "id": "json-mode",
+      "title": "JSON mode",
+      "whenToUse": "Free-form JSON, simple shapes, no nested unions.",
+      "mechanism": "Provider flag (response_format: json) forces output to parse as JSON. No schema validation at the wire — your Zod schema validates after.",
+      "tradeoff": "Lowest overhead. Schema not enforced — you can still get the wrong shape that parses as valid JSON. Wrap in your validator."
+    },
+    {
+      "id": "schema-constrained",
+      "title": "Schema-constrained decoding",
+      "whenToUse": "Hardest reliability requirements. Local model deployments.",
+      "mechanism": "Decoder is constrained at generation time to only emit tokens that keep a JSON Schema satisfiable. Outlines, llamacpp grammar, vLLM guided_json, OpenAI's strict mode.",
+      "tradeoff": "Mathematically can't produce invalid JSON for the schema. Some latency overhead. Not universally available across hosted APIs."
+    },
+    {
+      "id": "retry-with-error",
+      "title": "Retry with parse error in context",
+      "whenToUse": "After any parse failure in any of the above.",
+      "mechanism": "Catch the Zod error. Feed back as a user message: 'Your last output failed validation: <error message>. Return ONLY a JSON object matching the schema.' Re-run.",
+      "tradeoff": "Recovers most failures cheaply. Loops if the schema itself is impossible to satisfy — cap retries at 2."
+    },
+    {
+      "id": "repair-prompt",
+      "title": "LLM repair pass",
+      "whenToUse": "When the model produced near-valid output (e.g. trailing commas, smart quotes).",
+      "mechanism": "A cheap model (Haiku) is given the malformed string + the schema, asked to emit a valid JSON of the same intent.",
+      "tradeoff": "Surgical. Cheap. Doesn't help for semantically wrong outputs — only syntactic."
+    }
+  ],
+  "pitfalls": [
+    {
+      "id": "no-validation",
+      "title": "Trusting JSON mode without validation",
+      "body": "JSON mode guarantees JSON, not your JSON. {} is valid JSON. Always validate against your schema after parsing."
+    },
+    {
+      "id": "zod-vs-jsonschema-drift",
+      "title": "Zod-vs-JSON-Schema drift",
+      "body": "If your wire schema (JSON Schema) and your validation schema (Zod) drift, the model can satisfy one and not the other. Generate one from the other (zod-to-json-schema)."
+    },
+    {
+      "id": "retry-storm",
+      "title": "Retry storm",
+      "body": "Infinite retries on a schema the model truly can't satisfy. Cap retries (2 max). On final failure, surface the error, don't paper over."
+    },
+    {
+      "id": "tool-call-leakage",
+      "title": "Tool-call leakage in tool-as-extractor",
+      "body": "Model adds chatty text alongside the tool call. With tool_choice forcing the call, you can ignore the text. Make sure your handler only reads the tool args."
+    },
+    {
+      "id": "huge-schema",
+      "title": "Schema too large",
+      "body": "A nested schema with 30+ fields and unions tanks reliability. Split into two extraction passes, or simplify."
+    }
+  ],
+  "artifact": {
+    "kind": "code",
+    "language": "typescript",
+    "content": "// Reliable structured-output extraction with tool-as-extractor + Zod + retry.\nimport Anthropic from '@anthropic-ai/sdk';\nimport { z } from 'zod';\nimport { zodToJsonSchema } from 'zod-to-json-schema';\n\nexport async function extractStructured<S extends z.ZodTypeAny>(\n  client: Anthropic,\n  input: string,\n  schema: S,\n  systemPrompt: string,\n  maxRetries = 2,\n): Promise<z.infer<S>> {\n  const toolName = 'emit_result';\n  const inputSchema = zodToJsonSchema(schema, { target: 'openApi3' }) as Anthropic.Tool.InputSchema;\n  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: input }];\n\n  for (let attempt = 0; attempt <= maxRetries; attempt++) {\n    const res = await client.messages.create({\n      model: 'claude-sonnet-4-5',\n      max_tokens: 1024,\n      system: systemPrompt,\n      tools: [{ name: toolName, description: 'Emit the extraction result.', input_schema: inputSchema }],\n      tool_choice: { type: 'tool', name: toolName },\n      messages,\n    });\n    const tu = res.content.find(b => b.type === 'tool_use');\n    if (!tu || tu.type !== 'tool_use') {\n      throw new Error('Model failed to emit a tool call.');\n    }\n    const parsed = schema.safeParse(tu.input);\n    if (parsed.success) return parsed.data;\n\n    // Retry with the error in context.\n    messages.push({ role: 'assistant', content: res.content });\n    messages.push({\n      role: 'user',\n      content: `Validation failed: ${parsed.error.message}. Emit a corrected ${toolName} call.`,\n    });\n  }\n  throw new Error('extractStructured exceeded retries.');\n}"
+  }
+}

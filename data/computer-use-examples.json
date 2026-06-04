@@ -1,0 +1,74 @@
+{
+  "moduleId": "computer-use",
+  "moduleLabel": "Computer / Browser Use",
+  "intro": "Computer-use means giving the model an action space of mouse clicks, keystrokes, and screen reads. It is the most expensive, slowest, most error-prone form of integration. Almost always, an API is the right answer. This page is mostly about NOT using computer-use.",
+  "items": [
+    {
+      "id": "vision-grounded",
+      "title": "Vision-grounded (screenshot → action)",
+      "whenToUse": "When the only available interface is a GUI — legacy enterprise apps, hosted dashboards with no API, your own desktop apps.",
+      "mechanism": "Model receives a screenshot, emits a structured action (click at x,y / type text / scroll). Harness executes the action, takes the next screenshot. Loop. Anthropic's Computer Use, OpenAI's Operator, Browser Use.",
+      "tradeoff": "Maximum generality — any GUI. Slow (seconds per step). Brittle to layout changes. High token cost (screenshots are big)."
+    },
+    {
+      "id": "dom-grounded",
+      "title": "DOM-grounded (accessibility tree → action)",
+      "whenToUse": "Web automation where you control the harness (Playwright + LLM).",
+      "mechanism": "Instead of pixels, give the model the accessibility tree or a simplified DOM. Actions reference element IDs, not coordinates.",
+      "tradeoff": "Faster, cheaper, more robust than vision-grounded. Limited to web. Still slower than an API."
+    },
+    {
+      "id": "agentic-browsers",
+      "title": "Agentic browser products",
+      "whenToUse": "End-user task automation on the open web (book a flight, fill a form).",
+      "mechanism": "Vendor-managed browser + agent. You give a goal, they execute. Examples: Computer Use API, Browser Use, browserbase, Manus.",
+      "tradeoff": "Removes the harness burden; adds vendor lock-in + per-task pricing. Pre-built sandbox + retry logic."
+    },
+    {
+      "id": "task-recipes",
+      "title": "Task recipes (deterministic with LLM repair)",
+      "whenToUse": "Repetitive workflows where the happy path is well-known but edge cases break naive scripts.",
+      "mechanism": "Record a Playwright/Selenium script for the happy path. Wrap each step in a try-catch; on failure, call the LLM with the current screenshot + script context, ask for a one-shot repair action.",
+      "tradeoff": "Cheap and fast in the common case. LLM is only paid for when the brittleness shows up. Maintenance cost lives in the recipes, not the model."
+    },
+    {
+      "id": "when-not",
+      "title": "When NOT to use computer-use",
+      "whenToUse": "Almost always. Default to no.",
+      "mechanism": "Check for: (a) an HTTP/gRPC API, (b) a CSV/JSON export, (c) a database connection, (d) a webhook. If any exists, use it. Computer-use is the option of last resort, not first.",
+      "tradeoff": "An API call is 50–500× faster and cheaper, with deterministic behavior and structured outputs. There is no contest when an API exists."
+    }
+  ],
+  "pitfalls": [
+    {
+      "id": "scaling-trap",
+      "title": "Scaling trap",
+      "body": "Computer-use that works at 10/day costs $50. The same workflow at 10,000/day costs $50,000 and now needs a fleet of browsers. The cost shape does not look like an API."
+    },
+    {
+      "id": "screenshot-overhead",
+      "title": "Screenshot token overhead",
+      "body": "A full-page screenshot is 1500–3000 vision tokens. Multiply by 20 steps × 1000 tasks/day — vision tokens dominate the bill. Crop and compress."
+    },
+    {
+      "id": "captcha-and-bot-detection",
+      "title": "CAPTCHAs and bot detection",
+      "body": "Targets that detect automation will increasingly block agentic browsers. Plan for it; build manual-fallback paths into your workflows."
+    },
+    {
+      "id": "no-undo",
+      "title": "No undo",
+      "body": "An agent that clicks the wrong button submits a form. There is no transactional rollback over a GUI. Wrap destructive workflows in human approval gates."
+    },
+    {
+      "id": "credential-handling",
+      "title": "Credential handling",
+      "body": "Passing credentials into a screenshot-driven agent means they may show up in screenshots, traces, logs. Use injected credential handlers, scrub from traces, never let the model see secrets directly."
+    }
+  ],
+  "artifact": {
+    "kind": "prompt",
+    "language": "text",
+    "content": "<!-- Decision prompt: should I use computer-use here? -->\n\nBefore touching computer-use, answer these IN ORDER. Stop at the first YES.\n\n1. Is there a public HTTP/gRPC API for this task? → USE THE API.\n2. Is there a SOAP / legacy-RPC interface? → USE IT (yes, even SOAP).\n3. Is there a webhook or scheduled export I can consume? → USE IT.\n4. Is there a CLI or admin tool? → SHELL OUT.\n5. Is there a database I can read or write directly? → USE THE DB.\n6. Is there an RPA platform already in place? → PIPE THROUGH IT.\n7. Do I have ownership of the target UI? → ADD AN API ENDPOINT INSTEAD.\n\nIf you got here with no YES, computer-use is plausible. Now ask:\n- Volume: do I really need >100/day, or is this a one-off? (One-offs: just do it yourself.)\n- Cost: am I comfortable with $1–5 per task and 30–120s wall-clock?\n- Reliability: can I tolerate 5–15% failure rate before recovery?\n\nIf all three are 'yes' — proceed with computer-use, and budget a retry + human-fallback path from day one."
+  }
+}

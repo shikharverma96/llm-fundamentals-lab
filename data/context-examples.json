@@ -1,0 +1,81 @@
+{
+  "moduleId": "context",
+  "moduleLabel": "Context Engineering",
+  "intro": "Prompt engineering is one turn. Context engineering is the whole conversation: what goes in the window, what stays out, in what order, with which cache breakpoints, with which compaction triggers. It is the highest-leverage skill in agent work today.",
+  "items": [
+    {
+      "id": "slots",
+      "title": "The seven slots of an agent's context window",
+      "whenToUse": "Mental model for every turn.",
+      "mechanism": "(1) system prompt, (2) tool definitions, (3) static instructions / playbook, (4) conversation history, (5) retrieved chunks, (6) scratchpad / thinking, (7) reserved output budget. Each has different growth rate, cacheability, and compaction strategy.",
+      "tradeoff": "Knowing which slot owns what lets you target compaction to the slot that's actually bloating. Without the mental model, agents 'forget things' and 'cost too much' as one undifferentiated problem."
+    },
+    {
+      "id": "order-matters",
+      "title": "Order matters: primacy + recency",
+      "whenToUse": "Always.",
+      "mechanism": "Models attend more strongly to the beginning and end of context. Stable, load-bearing instructions go at the very top. Time-sensitive material (current turn's task) goes at the end.",
+      "tradeoff": "Free behavior — costs nothing to apply, has measurable effect. Worst case: critical instructions buried in the middle get ignored."
+    },
+    {
+      "id": "compaction",
+      "title": "Compaction strategies",
+      "whenToUse": "When approaching budget or after N turns.",
+      "mechanism": "(a) Summarize older tool results into a one-paragraph rollup. (b) Sliding window — drop turns past N. (c) Structural — keep IDs and references, drop verbose bodies. (d) LLM-pass compaction — a cheap model rewrites history to a fraction.",
+      "tradeoff": "Saves tokens. Loses fidelity. Best blends: keep recent N turns raw, summarize older."
+    },
+    {
+      "id": "cache-breakpoints",
+      "title": "Cache breakpoints (Anthropic)",
+      "whenToUse": "Whenever the same system / tool defs / early messages repeat across calls.",
+      "mechanism": "Anthropic prompt caching gives 90% discount on cached input tokens. Place cache_control: { type: 'ephemeral' } at the end of: system prompt, tool definitions, the older portion of conversation. Last turn is never cached.",
+      "tradeoff": "For agents the savings are enormous — system + tools are huge and re-sent every step. Cache hit requires byte-identical prefix; invalidate on system/tool/edit."
+    },
+    {
+      "id": "retrieval-vs-injection",
+      "title": "Retrieval vs injection",
+      "whenToUse": "Decision per category of content.",
+      "mechanism": "Small, stable, always-needed content → inject (system prompt). Large, dynamic, sometimes-needed → retrieve at runtime. Mistakes go both ways: injecting too much bloats; retrieving too late costs latency.",
+      "tradeoff": "Inject everything = cheap retrieval but unbounded context. Retrieve everything = small context but extra hop + relevance bugs."
+    },
+    {
+      "id": "tool-result-discipline",
+      "title": "Tool result discipline",
+      "whenToUse": "Every tool result entering context.",
+      "mechanism": "Truncate at the tool boundary with an explicit '[truncated: N more chars]' marker. Strip irrelevant fields server-side. Offer paginate-via-tool if the model wants more.",
+      "tradeoff": "Bounds growth without surprising the model. The marker is critical — silent truncation is worse than visible."
+    }
+  ],
+  "pitfalls": [
+    {
+      "id": "no-budget",
+      "title": "No per-turn budget",
+      "body": "Context grows unbounded until the API rejects. Set a target (e.g. 60% of window for input) and compact when crossed."
+    },
+    {
+      "id": "verbose-thinking",
+      "title": "Unbounded thinking blocks",
+      "body": "Extended thinking is great until it eats half the window. Cap the budget; compact older thinking into 'I previously decided X' summaries."
+    },
+    {
+      "id": "stale-cache",
+      "title": "Cache invalidated unexpectedly",
+      "body": "A 'small' edit to the system prompt invalidates the cache for every running session. Treat cache prefixes as immutable; version them."
+    },
+    {
+      "id": "duplicate-injection",
+      "title": "Duplicate context injection",
+      "body": "Same retrieved chunk appears 3× across turns because retrieval ran 3×. Dedupe before injection; track what's already in context."
+    },
+    {
+      "id": "no-observability",
+      "title": "No per-turn token telemetry",
+      "body": "If you don't track tokens-per-turn over time, you cannot see context bloat coming. Log input tokens with a slot breakdown."
+    }
+  ],
+  "artifact": {
+    "kind": "code",
+    "language": "typescript",
+    "content": "// ContextManager: minimal contract for budgeting + compaction + caching.\nexport interface MessageSlot {\n  role: 'system' | 'tools' | 'history' | 'retrieved' | 'current';\n  content: string | object;\n  tokenEstimate: number;\n  cacheable: boolean;\n}\n\nexport interface ContextManager {\n  /** Add a slot to the pending turn. */\n  add(slot: MessageSlot): void;\n  /** Pack into an Anthropic Messages API payload, applying budget + compaction + cache markers. */\n  pack(budgetTokens: number): {\n    system: { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }[];\n    messages: { role: 'user' | 'assistant'; content: unknown }[];\n    cacheBreakpoints: number;\n  };\n  /** Run compaction policy. Returns tokens freed. */\n  compact(strategy: 'summarize-old' | 'drop-old' | 'structural'): Promise<number>;\n  /** Telemetry. */\n  telemetry(): { perSlot: Record<string, number>; total: number };\n}\n\n// Reference compaction triggers.\nexport const COMPACTION_TRIGGERS = {\n  /** Compact when input would exceed 60% of context window. */\n  byBudget: (currentTokens: number, windowTokens: number) => currentTokens / windowTokens > 0.6,\n  /** Compact every N turns regardless. */\n  byTurns: (turnNumber: number, every = 10) => turnNumber > 0 && turnNumber % every === 0,\n  /** Compact when scratchpad alone exceeds K. */\n  byScratchpad: (scratchpadTokens: number, max = 3000) => scratchpadTokens > max,\n};"
+  }
+}

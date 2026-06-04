@@ -1,0 +1,111 @@
+{
+  "taxonomy": [
+    {
+      "type": "intrinsic",
+      "title": "Summarizer flips a number in the source",
+      "context": "Q3 revenue came in at $48.2M, down 6% year-over-year. Operating margin held at 14%, unchanged from Q2. The board approved a $25M share buyback.",
+      "prompt": "Summarize the financial update above in one sentence.",
+      "modelOutput": "In Q3, revenue grew 6% year-over-year to $48.2M while operating margin expanded to 14%, and the board approved a $25M buyback.",
+      "whyItsWrong": "The source says revenue was DOWN 6%, not up, and margin was UNCHANGED, not expanded. The summary directly contradicts the input it was given.",
+      "giveaway": "Always diff a summary against the source — intrinsic errors are the easiest to catch but the most damaging because they look authoritative."
+    },
+    {
+      "type": "extrinsic",
+      "title": "Fabricated citation for a real-sounding paper",
+      "context": null,
+      "prompt": "Give me a peer-reviewed citation for the original Transformer architecture paper.",
+      "modelOutput": "Vaswani, A., Shazeer, N., Parmar, N., et al. (2017). Attention Is All You Need. Journal of Machine Learning Research, 18(142), 1–32.",
+      "whyItsWrong": "The authors and title are real, but the venue is fabricated. The paper appeared at NeurIPS 2017 (and on arXiv as 1706.03762), not in JMLR. Models trained on shaped citation data confabulate journal/volume/page tuples that pattern-match what an academic citation 'looks like'.",
+      "giveaway": "Citations with confident page ranges are a classic extrinsic tell — verify against the actual venue or a DOI lookup before quoting."
+    },
+    {
+      "type": "factual",
+      "title": "Confident wrong answer to a closed-world fact",
+      "context": null,
+      "prompt": "Who won the FIFA World Cup in 1990 and who did they beat in the final?",
+      "modelOutput": "Argentina won the 1990 FIFA World Cup, defeating Germany 1-0 in the final at the Stadio Olimpico in Rome.",
+      "whyItsWrong": "West Germany beat Argentina 1-0 in the 1990 final — the model has the winner and loser swapped. The venue is right, the score is right, the loser-vs-winner direction is wrong. This is the most dangerous flavor: surface details are correct, so the wrong claim is camouflaged.",
+      "giveaway": "Closed-world facts (dates, scores, winners) should be retrieved, not generated. RAG over a trusted source beats parametric recall every time."
+    },
+    {
+      "type": "reasoning",
+      "title": "Correct facts, broken inference chain",
+      "context": null,
+      "prompt": "Alice is twice as old as Bob was when Alice was Bob's current age. Alice is 30 and Bob is 24. How old was Bob when Alice was 24?",
+      "modelOutput": "Alice is currently 30 and Bob is currently 24, so Alice is 6 years older. When Alice was 24, Bob was 24 - 6 = 18. So Bob was 18 when Alice was 24. Therefore Alice (30) is twice 18, which checks out.",
+      "whyItsWrong": "The arithmetic step (Bob was 18) is correct, but the consistency check is wrong: 2 × 18 = 36, not 30. The model produced a fluent chain that contradicts itself in the final line yet asserts it 'checks out'. Each individual fact is fine; the logical glue fails.",
+      "giveaway": "Re-run the model on its own conclusion with 'verify step by step' or use a tool (calculator, code) for any numeric claim. Reasoning hallucinations vanish under self-consistency voting."
+    }
+  ],
+  "temperatureDemo": {
+    "prompt": "In two sentences, explain what a transformer's attention mechanism does.",
+    "systemPrompt": "You are a concise technical explainer. Be precise.",
+    "samples": [
+      {
+        "temperature": 0.0,
+        "label": "T = 0.0 (greedy)",
+        "output": "Attention lets each token in a sequence compute a weighted sum over all other tokens, where the weights come from the dot product of learned query and key vectors. This gives the model a direct, content-based way to route information across positions without recurrence.",
+        "annotation": "Deterministic. Picks the argmax token at every step. Safe, repeatable, sometimes flat — exactly what you want for extraction, classification, code, math.",
+        "hallucinationRisk": "low"
+      },
+      {
+        "temperature": 0.7,
+        "label": "T = 0.7 (balanced)",
+        "output": "Attention assigns each token a query and a key; the softmax of their dot products produces weights that decide how much every other token contributes to its updated representation. It's the mechanism that lets a transformer mix information across positions in a single, parallelizable step.",
+        "annotation": "The conventional default for prose. Distribution is sharpened but still has tail mass — you get fluency and variation without going off the rails. Good for chat, drafting, brainstorming.",
+        "hallucinationRisk": "medium"
+      },
+      {
+        "temperature": 1.5,
+        "label": "T = 1.5 (creative / risky)",
+        "output": "Attention is the transformer's whisper network: every token shouts a question into the room, every other token answers with a key, and softmax decides who actually got heard — a kind of differentiable democracy invented by Schmidhuber in 1991 and rediscovered by Vaswani at DeepMind in 2017.",
+        "annotation": "Flat distribution — low-probability tokens get drawn into the sample. Stylistic flourish appears, but so does extrinsic hallucination: Vaswani et al. were at Google Brain, not DeepMind, and the 1991 attribution is a half-truth aggressively stretched. Reserve high T for ideation where you'll fact-check the output.",
+        "hallucinationRisk": "high"
+      }
+    ]
+  },
+  "promptPairs": [
+    {
+      "id": "scoped",
+      "label": "Open question vs scoped question",
+      "bad": {
+        "prompt": "Tell me about the GDPR.",
+        "likelyOutput": "A wandering 600-word essay mixing accurate articles with hand-wavy claims about fines, scope, and edge cases — confidence high, citations absent.",
+        "problem": "No scope, no source, no success criterion. The model fills the vacuum with the most generic-sounding GDPR content in its weights, including parts that don't apply to your case and parts that are subtly out of date."
+      },
+      "good": {
+        "prompt": "I run a US-based B2B SaaS with no EU customers but my email provider stores data in Ireland. List the specific GDPR obligations (if any) that apply to me, citing article numbers. If a question requires legal advice, say so.",
+        "likelyOutput": "A short, structured list of 2–4 applicable articles with caveats, plus an explicit 'consult counsel for X' on items that need a lawyer.",
+        "why": "Scope (your situation), format (list), evidence requirement (article numbers), and an escape hatch ('say so') collectively shrink the space the model can hallucinate into."
+      }
+    },
+    {
+      "id": "anchored",
+      "label": "No-source vs source-anchored",
+      "bad": {
+        "prompt": "What were Acme Corp's Q3 results?",
+        "likelyOutput": "Plausible-sounding numbers — revenue, growth rate, EPS — invented to match the shape of a real earnings summary.",
+        "problem": "The model has no way to know whether 'Acme Corp' is a real company in its training data, and even if it is, the latest quarter is almost certainly outside its knowledge cutoff. With no anchor, it produces a fluent fabrication."
+      },
+      "good": {
+        "prompt": "Using only the press release below, extract Acme Corp's Q3 revenue, YoY growth, and operating margin. If a field is not present, output 'not stated'.\n\n<press_release>\n{paste full text here}\n</press_release>",
+        "likelyOutput": "Three values (or 'not stated') pulled directly from the supplied text, no extrapolation.",
+        "why": "Pinning the model to a supplied document with explicit instructions for missing fields turns generation into extraction — the easiest task for an LLM to do reliably."
+      }
+    },
+    {
+      "id": "idk",
+      "label": "No fallback vs explicit 'I don't know'",
+      "bad": {
+        "prompt": "Summarize what the text below says about climate adaptation funding.\n\n<text>\nThe report covers electric vehicle subsidies and carbon capture R&D budgets for FY2025.\n</text>",
+        "likelyOutput": "A confident invented paragraph about climate adaptation funding, because the model treats 'summarize' as a directive that must produce content.",
+        "problem": "When the prompt asks for a topic the source doesn't cover, models tend to fabricate rather than refuse. They optimize for completing the task, not for honesty about missing data."
+      },
+      "good": {
+        "prompt": "Using only the text below, summarize what it says about climate adaptation funding. If climate adaptation funding is not mentioned, respond with exactly: 'not found in source'.\n\n<text>\nThe report covers electric vehicle subsidies and carbon capture R&D budgets for FY2025.\n</text>",
+        "likelyOutput": "not found in source",
+        "why": "An explicit, exact-string fallback gives the model a high-probability 'safe' completion that beats fabrication. This pattern is the single highest-leverage anti-hallucination move in RAG pipelines."
+      }
+    }
+  ]
+}

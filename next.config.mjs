@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'export',
+  // `output: 'export'` removed so the agentic /api/ask route can run on
+  // Vercel serverless. Non-API pages still prerender statically.
   reactStrictMode: true,
   trailingSlash: true,
   images: { unoptimized: true },

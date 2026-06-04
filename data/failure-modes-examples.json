@@ -1,0 +1,118 @@
+{
+  "moduleId": "failure-modes",
+  "moduleLabel": "Agent Failure Modes",
+  "intro": "LLM agents fail in categorically different ways than LLM completions. Hallucination is one of many. Below: twelve named failure modes with cause, detection signal, and mechanical fix. This taxonomy is the index — every other module's pitfalls are instances of these.",
+  "items": [
+    {
+      "id": "infinite-loop",
+      "title": "Infinite loop",
+      "whenToUse": "Detect: same tool called with identical args N+ times.",
+      "mechanism": "Cause: tool returns ambiguous result, model retries same approach. Detect: deduplicate signature of (tool_name, JSON.stringify(args)); count repeats.",
+      "tradeoff": "Fix: on N=3 repeat, surface to model as a tool error ('you've called X three times with same args — try a different approach') and force a different action."
+    },
+    {
+      "id": "premature-stop",
+      "title": "Premature stop",
+      "whenToUse": "Model emits end_turn with the sub-task incomplete.",
+      "mechanism": "Cause: model judges 'done' on inadequate evidence. Detect: validate final output against task contract (schema, expected fields, length floor).",
+      "tradeoff": "Fix: on validation failure, push the validator's error as a tool_result and force another loop turn. Equivalent to Reflexion-lite."
+    },
+    {
+      "id": "tool-hallucination",
+      "title": "Tool hallucination (unknown tool)",
+      "whenToUse": "Model calls a tool that does not exist.",
+      "mechanism": "Cause: tool name was in training data or 'feels right'. Detect: name not in registry.",
+      "tradeoff": "Fix: return tool_result with is_error: true and explicit message 'Unknown tool. Available tools: X, Y, Z.' Model self-corrects."
+    },
+    {
+      "id": "arg-hallucination",
+      "title": "Arg hallucination",
+      "whenToUse": "Real tool called with invented argument values (made-up ids, wrong enum, fake user_id).",
+      "mechanism": "Cause: model confabulates plausible-looking ids. Detect: schema validation at the handler boundary; semantic checks (does the id exist?).",
+      "tradeoff": "Fix: structured error envelope back; never silently coerce."
+    },
+    {
+      "id": "context-poisoning",
+      "title": "Context poisoning",
+      "whenToUse": "Tool result reshapes model behavior in unintended ways.",
+      "mechanism": "Cause: indirect prompt injection (Module J). Detect: delimited untrusted content + an output validator catching unexpected actions.",
+      "tradeoff": "Fix: defense-in-depth from Module J. No single mitigation suffices."
+    },
+    {
+      "id": "goal-drift",
+      "title": "Goal drift",
+      "whenToUse": "Long horizons (20+ steps).",
+      "mechanism": "Cause: original task gets displaced by accumulated tool results. Detect: at each turn, the model is asked to restate the goal; deviation flagged.",
+      "tradeoff": "Fix: pin the goal at the END of each user-message slot (recency bias). Or: subagent delegation (Module L) for sub-tasks."
+    },
+    {
+      "id": "over-eager-handoff",
+      "title": "Over-eager hand-off",
+      "whenToUse": "Multi-agent systems.",
+      "mechanism": "Cause: agent A passes to B at the first sign of out-of-domain, when A could have handled it. Detect: handoff rate by category; compare to expert routing baseline.",
+      "tradeoff": "Fix: tighten hand-off criteria in agent A's prompt; add a 'try first, hand off only if stuck' clause."
+    },
+    {
+      "id": "under-eager-handoff",
+      "title": "Under-eager hand-off",
+      "whenToUse": "Multi-agent systems.",
+      "mechanism": "Cause: specialist refuses to delegate even when out of scope. Detect: low handoff rate + low task success on out-of-domain queries.",
+      "tradeoff": "Fix: add explicit hand-off targets and triggers to the system prompt. 'When the question is about X, hand to expert_X.'"
+    },
+    {
+      "id": "truncation-cascade",
+      "title": "Truncation cascade",
+      "whenToUse": "Tool returns oversized payload, gets cut, model answers from partial.",
+      "mechanism": "Cause: tool result truncated silently. Detect: hash before/after at the truncation boundary; mark explicitly.",
+      "tradeoff": "Fix: '[truncated: N more chars]' marker is mandatory. Provide a paginate-via-tool affordance for the model to ask for more."
+    },
+    {
+      "id": "parse-storm",
+      "title": "Parse-and-retry storm",
+      "whenToUse": "Structured outputs failing repeatedly.",
+      "mechanism": "Cause: schema too complex, or model output drifts. Detect: retry counter exceeds threshold.",
+      "tradeoff": "Fix: cap retries (2). On final failure, surface the error verbatim. Investigate the schema — usually the cure is schema simplification."
+    },
+    {
+      "id": "tool-result-swallowing",
+      "title": "Tool result swallowing",
+      "whenToUse": "Model ignores tool result and hallucinates instead.",
+      "mechanism": "Cause: tool result format unfamiliar to the model, or system prompt overrides 'cite tool results'. Detect: response asserts facts not in the tool_result.",
+      "tradeoff": "Fix: include 'Always cite the tool result by name when stating a fact retrieved via a tool' in system prompt. Validate citations programmatically."
+    },
+    {
+      "id": "schema-confusion",
+      "title": "Schema confusion",
+      "whenToUse": "Two tools with overlapping descriptions or schemas.",
+      "mechanism": "Cause: model picks randomly between near-duplicates. Detect: tool selection variance on identical inputs.",
+      "tradeoff": "Fix: consolidate tools. Sharpen descriptions (when-to-use-this-over-that). See Module G."
+    }
+  ],
+  "pitfalls": [
+    {
+      "id": "treating-as-llm-bug",
+      "title": "Treating agent failures as LLM bugs",
+      "body": "Most agent failures are HARNESS bugs. Better tools, better schemas, better budgets fix them — not better prompts or bigger models."
+    },
+    {
+      "id": "no-traces",
+      "title": "Debugging without traces",
+      "body": "Without full traces (every step, every tool call, every arg), you cannot classify what failed. Build the trace stack first; debug second."
+    },
+    {
+      "id": "fixing-symptom",
+      "title": "Fixing the symptom",
+      "body": "Adding 'don't loop' to the system prompt is not a fix for infinite loops. The fix is in the harness (loop detector). Match the fix to the mode."
+    },
+    {
+      "id": "one-error-class",
+      "title": "Lumping all failures into 'agent didn't work'",
+      "body": "Your eval needs to classify failure mode. 'It failed' is not actionable; 'it tool-hallucinated on 12% of cases' is."
+    }
+  ],
+  "artifact": {
+    "kind": "code",
+    "language": "typescript",
+    "content": "// Failure-mode detectors. Compose into your runtime.\nimport type { AgentStep } from '@/lib/schemas/agent-trace';\n\n/** Detect infinite loops: same (tool, args) signature N+ times in window. */\nexport function detectInfiniteLoop(\n  steps: AgentStep[],\n  window = 6,\n  threshold = 3,\n): { detected: boolean; signature?: string } {\n  const recent = steps.slice(-window).filter(s => s.kind === 'tool_call');\n  const counts = new Map<string, number>();\n  for (const s of recent) {\n    const sig = `${s.tool?.name}:${JSON.stringify(s.tool?.args ?? {})}`;\n    counts.set(sig, (counts.get(sig) ?? 0) + 1);\n  }\n  for (const [sig, n] of counts) {\n    if (n >= threshold) return { detected: true, signature: sig };\n  }\n  return { detected: false };\n}\n\n/** Detect premature stop: final answer fails downstream validator. */\nexport function detectPrematureStop<T>(\n  finalText: string,\n  validator: (s: string) => { ok: boolean; reason?: string },\n): { detected: boolean; reason?: string } {\n  const v = validator(finalText);\n  return v.ok ? { detected: false } : { detected: true, reason: v.reason };\n}\n\n/** Detect tool hallucination: tool name not in registry. */\nexport function detectToolHallucination(\n  toolName: string,\n  registry: ReadonlySet<string>,\n): boolean {\n  return !registry.has(toolName);\n}\n\n/** Parse-and-retry circuit breaker. */\nexport class ParseRetryCircuit {\n  constructor(private readonly max = 2) {}\n  private count = 0;\n  attempt(): boolean {\n    if (this.count >= this.max) return false;\n    this.count++;\n    return true;\n  }\n  reset(): void {\n    this.count = 0;\n  }\n}"
+  }
+}

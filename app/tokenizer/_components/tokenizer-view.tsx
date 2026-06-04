@@ -8,6 +8,7 @@ import { TOKENIZERS } from '@/lib/tokenizer';
 
 import { CostProjection } from './cost-projection';
 import { Leaderboard } from './leaderboard';
+import { LearnPanel } from './learn-panel';
 import { StatsPanel } from './stats-panel';
 import { TokenViz } from './token-viz';
 import { countTokens, type EngineResult, tokenizeWith } from './tokenizer-engine';
@@ -173,6 +174,8 @@ export function TokenizerView({ pricing }: Props): React.ReactElement {
           </CardContent>
         </Card>
       </div>
+
+      <LearnPanel />
     </div>
   );
 }

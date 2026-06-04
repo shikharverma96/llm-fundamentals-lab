@@ -11,6 +11,7 @@ import type {
 } from '@/lib/schemas/benchmarks';
 import { QUANTIZATION_LABELS } from '@/lib/schemas/benchmarks';
 
+import { LearnPanel } from './learn-panel';
 import { MetricCards } from './metric-cards';
 import { ParetoChart } from './pareto-chart';
 import { SampleDiff } from './sample-diff';
@@ -93,6 +94,8 @@ export function QuantizationView({ data }: Props): React.ReactElement {
           />
         </CardContent>
       </Card>
+
+      <LearnPanel />
     </div>
   );
 }

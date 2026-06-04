@@ -1,0 +1,95 @@
+{
+  "moduleId": "frameworks",
+  "moduleLabel": "Framework Decision Matrix",
+  "intro": "Eight credible frameworks for building LLM agents in 2025–2026. They sit at different points on the control / determinism / observability axes. The right one is the one whose primitives match your task; the wrong one fights you on every step.",
+  "items": [
+    {
+      "id": "claude-agent-sdk",
+      "title": "Claude Agent SDK (Anthropic)",
+      "whenToUse": "Building on Claude. Want the closest match to Anthropic's own agent design (Claude Code, Computer Use, MCP first-class).",
+      "mechanism": "TS/Python SDK. Agent loop primitive + MCP + Skills + computer-use built in. Hooks for permissions, logging, sub-agents.",
+      "tradeoff": "Vendor-coupled to Anthropic. Lowest impedance match for Claude-specific features. Young; surface area still moving."
+    },
+    {
+      "id": "langgraph",
+      "title": "LangGraph (LangChain)",
+      "whenToUse": "Stateful, graph-shaped agents with explicit control flow. Production deployments needing time-travel debugging.",
+      "mechanism": "Define nodes + edges. State is persistent. Built-in checkpointing, retry, human-in-the-loop.",
+      "tradeoff": "More verbose than loop-style frameworks. Pays back when you need replayable state machines. Heavyweight ecosystem (LangChain) is opt-in."
+    },
+    {
+      "id": "openai-agents-sdk",
+      "title": "OpenAI Agents SDK",
+      "whenToUse": "Building on OpenAI models. Multi-agent handoffs as first-class primitive.",
+      "mechanism": "Agents define instructions + tools + handoffs. Runner orchestrates. Tracing built in.",
+      "tradeoff": "Tightly coupled to OpenAI. Clean API; smaller feature surface than LangGraph."
+    },
+    {
+      "id": "autogen",
+      "title": "AutoGen (Microsoft)",
+      "whenToUse": "Multi-agent conversational systems. Research-style exploration of agent-to-agent dynamics.",
+      "mechanism": "Conversable agents talk to each other. Group chat, manager agent, code execution.",
+      "tradeoff": "Excellent for prototyping novel topologies. Less polished for production observability."
+    },
+    {
+      "id": "crewai",
+      "title": "CrewAI",
+      "whenToUse": "Role-based agent crews (researcher + writer + critic). Quick to scaffold.",
+      "mechanism": "Define agents with roles + goals + tools. Tasks delegated by role. Sequential or hierarchical processes.",
+      "tradeoff": "Opinionated about the 'crew' metaphor. Great for that shape, awkward outside it."
+    },
+    {
+      "id": "smolagents",
+      "title": "smolagents (HuggingFace)",
+      "whenToUse": "Code-as-action agents. Want minimal abstraction.",
+      "mechanism": "Agent writes Python code each step instead of structured tool calls. Code is the action space.",
+      "tradeoff": "Very expressive; very dangerous without sandboxing. Best when paired with E2B or similar."
+    },
+    {
+      "id": "pydantic-ai",
+      "title": "Pydantic AI",
+      "whenToUse": "Type-safe agents in Python. Structured-output-first design.",
+      "mechanism": "Agents return Pydantic-validated outputs. Dependencies injected for typed tool args. Streaming built in.",
+      "tradeoff": "Best-in-class type safety. Python-only. Less multi-agent affordance than LangGraph/AutoGen."
+    },
+    {
+      "id": "mastra",
+      "title": "Mastra",
+      "whenToUse": "TypeScript-first stack with workflows, evals, RAG, and observability bundled.",
+      "mechanism": "Workflow DSL + agent primitives + dev playground. Designed for serverless + edge.",
+      "tradeoff": "Younger than LangGraph but TS-native. Good when team's existing stack is Node/Next.js."
+    }
+  ],
+  "pitfalls": [
+    {
+      "id": "framework-first",
+      "title": "Picking a framework before knowing the task shape",
+      "body": "Sit down with the task; sketch the graph. THEN pick the framework whose primitives match. Picking framework-first guarantees you'll fight it later."
+    },
+    {
+      "id": "abstraction-tax",
+      "title": "Abstraction tax",
+      "body": "Every framework adds layers. For a 50-line agent, raw Anthropic SDK is clearer. For a 5000-line stateful workflow, the framework saves you. Match weight to weight."
+    },
+    {
+      "id": "lock-in",
+      "title": "Vendor lock-in via primitives",
+      "body": "Some frameworks couple tightly to one model family. If you might switch, prefer ones with model-agnostic abstractions."
+    },
+    {
+      "id": "observability-afterthought",
+      "title": "Observability as afterthought",
+      "body": "Frameworks vary wildly in what they let you see at runtime. Pick one where tracing is first-class; bolting it on is painful."
+    },
+    {
+      "id": "fad-driven",
+      "title": "Switching every quarter",
+      "body": "The field churns fast. Stability of YOUR team's velocity > stability of YOUR choice of framework. Pick one, get good at it, switch only when the cost-of-stay clearly exceeds cost-of-switch."
+    }
+  ],
+  "artifact": {
+    "kind": "prompt",
+    "language": "text",
+    "content": "<!-- Decision questions. Answer all six before picking. -->\n\n1. Which model provider? Single (locked-in OK) or multi (need agnostic abstractions)?\n2. What language is the existing codebase in? Python, TypeScript, or polyglot?\n3. What's the agent's expected horizon — single-shot, conversation, or hours-long workflow?\n4. Do you need replayable state / checkpoints / time-travel debugging?\n5. Do you need first-class multi-agent topology, or single-agent-with-tools?\n6. How much will you need to customize the loop vs. accept defaults?\n\nMapping (rough guidance, not gospel):\n- Single-shot Claude + TS → Claude Agent SDK or Mastra.\n- Single-shot OpenAI + TS → OpenAI Agents SDK.\n- Long-horizon stateful workflow + Python → LangGraph.\n- Multi-agent research / topology exploration → AutoGen.\n- Role-based crews → CrewAI.\n- Code-as-action (sandboxed) → smolagents.\n- Type-safe structured outputs + Python → Pydantic AI."
+  }
+}

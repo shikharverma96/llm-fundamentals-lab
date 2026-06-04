@@ -1,0 +1,74 @@
+{
+  "moduleId": "memory",
+  "moduleLabel": "Memory Architecture",
+  "intro": "Memory is not one thing. Production agents juggle five distinct stores with different write rules, retrieval mechanisms, and retention horizons. Confusing them is the root of most context-bloat bugs.",
+  "items": [
+    {
+      "id": "scratchpad",
+      "title": "Scratchpad",
+      "whenToUse": "Within-turn working notes the model writes to itself between tool calls.",
+      "mechanism": "Lives in the current message list. Created by thinking blocks or assistant text. Discarded when the turn closes (or kept if the loop continues).",
+      "tradeoff": "Free, automatic, ephemeral. Easy to blow the context window if not compacted."
+    },
+    {
+      "id": "working",
+      "title": "Working memory (conversation buffer)",
+      "whenToUse": "Across-turn but same-session context: recent messages, tool results, current sub-goal.",
+      "mechanism": "The full message list passed each turn. Often sliding-windowed or summarized when it grows past a budget.",
+      "tradeoff": "Direct, no retrieval overhead. Token cost grows linearly with conversation length unless compacted."
+    },
+    {
+      "id": "episodic",
+      "title": "Episodic memory",
+      "whenToUse": "Specific past interactions — 'remember when we discussed X two weeks ago'.",
+      "mechanism": "External store (vector + metadata). On each turn, retrieve top-K similar prior episodes and inject as labeled context.",
+      "tradeoff": "Scales to arbitrary history. Adds retrieval latency + a category of relevance bugs. Privacy footprint."
+    },
+    {
+      "id": "semantic",
+      "title": "Semantic memory",
+      "whenToUse": "Distilled facts the agent knows about the user, world, or task ('the user prefers SI units', 'API X returns ISO-8601 dates').",
+      "mechanism": "Updated by a slower offline (or end-of-session) summarizer. Read at the start of every conversation.",
+      "tradeoff": "Tiny, persistent, durable. Risk of stale or contradictory facts — needs a write-with-evidence policy."
+    },
+    {
+      "id": "procedural",
+      "title": "Procedural memory",
+      "whenToUse": "Skills / playbooks the agent has accumulated ('to deploy, run X then Y then Z').",
+      "mechanism": "Versioned markdown or code files retrieved by skill name. Anthropic Skills + CLAUDE.md files are exactly this.",
+      "tradeoff": "Most powerful and least flashy of the five. Pays compounding interest as the corpus grows."
+    }
+  ],
+  "pitfalls": [
+    {
+      "id": "unbounded-scratchpad",
+      "title": "Unbounded scratchpad",
+      "body": "Agent writes long internal monologues every step. After 20 steps the prompt is 80% old monologue and 20% current state. Truncate or summarize aggressively."
+    },
+    {
+      "id": "episodic-dump",
+      "title": "Episodic dump = context bloat",
+      "body": "Retrieving top-20 past episodes each turn floods working memory. Cap K low, prefer summaries over raw transcripts, dedupe before injecting."
+    },
+    {
+      "id": "no-compaction",
+      "title": "No compaction strategy",
+      "body": "Turn 30 is paying token cost for turn 1's tool results. Pick a compaction trigger (turn count, token budget, idle minutes) and a strategy (summarize, drop, archive)."
+    },
+    {
+      "id": "semantic-drift",
+      "title": "Semantic memory drift",
+      "body": "Agent updates 'user prefers Spanish' on a one-off Spanish message. Require evidence count or confidence before writing a long-lived fact."
+    },
+    {
+      "id": "procedural-as-tool",
+      "title": "Treating procedures as tools",
+      "body": "A playbook called as a tool returns a giant blob into context. Better: load procedural memory once at session start, not on every step."
+    }
+  ],
+  "artifact": {
+    "kind": "code",
+    "language": "typescript",
+    "content": "// Memory router: minimal contracts for the five stores.\nexport interface MemoryStore {\n  kind: 'scratchpad' | 'working' | 'episodic' | 'semantic' | 'procedural';\n  read(query: { taskId: string; userId?: string; k?: number }): Promise<string[]>;\n  write(item: { content: string; tags?: string[]; evidence?: number }): Promise<void>;\n  compact(budgetTokens: number): Promise<void>;\n}\n\n// Policy: when to write to which store.\nexport function classifyForMemory(text: string): MemoryStore['kind'] | null {\n  if (/^I (always|prefer|usually)/i.test(text)) return 'semantic';\n  if (/^step \\d+:/i.test(text)) return 'procedural';\n  if (text.length > 600) return 'episodic';\n  return 'working';\n}\n\n// Compose a turn's context budget across stores.\nexport async function packContext(stores: Record<MemoryStore['kind'], MemoryStore>, taskId: string, userId: string) {\n  const [semantic, procedural, episodic] = await Promise.all([\n    stores.semantic.read({ taskId, userId, k: 5 }),\n    stores.procedural.read({ taskId, k: 1 }),\n    stores.episodic.read({ taskId, userId, k: 3 }),\n  ]);\n  return [\n    semantic.length ? `<facts>\\n${semantic.join('\\n')}\\n</facts>` : '',\n    procedural.length ? `<playbook>\\n${procedural[0]}\\n</playbook>` : '',\n    episodic.length ? `<past-episodes>\\n${episodic.join('\\n---\\n')}\\n</past-episodes>` : '',\n  ].filter(Boolean).join('\\n\\n');\n}"
+  }
+}

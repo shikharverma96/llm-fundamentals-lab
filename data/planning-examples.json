@@ -1,0 +1,74 @@
+{
+  "moduleId": "planning",
+  "moduleLabel": "Planning Patterns",
+  "intro": "When the plain agent loop isn't enough — when steps branch, when you need to backtrack, when wall-clock matters — you reach for an explicit planning strategy. Four common ones, each with a different cost / robustness tradeoff. None is universally better; the right one depends on task shape.",
+  "items": [
+    {
+      "id": "react",
+      "title": "ReAct (Reason + Act)",
+      "whenToUse": "Default for tool-using agents. Tasks where each step is small and verifiable.",
+      "mechanism": "Interleaved thought / action / observation. Model writes its rationale, picks a tool, sees the result, updates rationale, repeats. The 'plain agent loop' from Module F is ReAct.",
+      "tradeoff": "Simple, debuggable, low overhead. Fails on long horizons because reasoning is greedy — no global plan."
+    },
+    {
+      "id": "plan-execute",
+      "title": "Plan-and-Execute",
+      "whenToUse": "Task decomposes cleanly. Sub-tasks are independent or have clear dependencies.",
+      "mechanism": "Planner LLM emits a structured plan up front (list of sub-tasks, dependencies). Executor runs each in order or in parallel. Re-plan only if a sub-task fails.",
+      "tradeoff": "Better wall-clock when sub-tasks parallelize. Brittle if the task discovery is dynamic — early plan goes stale fast."
+    },
+    {
+      "id": "reflexion",
+      "title": "Reflexion",
+      "whenToUse": "Task has a verifiable success signal (tests pass, output matches schema, judge approves).",
+      "mechanism": "Run, evaluate, reflect (write a self-critique), retry with the critique in context. Bounded by max-retries.",
+      "tradeoff": "Climbs quality measurably. Cost is N× a single attempt. Stops cleanly when the signal is binary; fuzzy when it isn't."
+    },
+    {
+      "id": "tot",
+      "title": "Tree-of-Thoughts",
+      "whenToUse": "Search problems where exploring multiple paths is genuinely useful (proofs, puzzles, plan-search).",
+      "mechanism": "At each node, expand K candidate next-steps; score each (via the same or a judge model); keep top-M; recurse to depth D. Beam search over reasoning chains.",
+      "tradeoff": "K × M × D blowup in cost and latency. Justified on a narrow class of problems; almost never the answer for chat or code agents."
+    },
+    {
+      "id": "self-ask",
+      "title": "Self-Ask",
+      "whenToUse": "Multi-hop factual questions where decomposition into sub-questions is natural.",
+      "mechanism": "Model writes 'Follow-up question:', answers it (often via a tool), then writes the next follow-up. Stops when no more follow-ups are needed.",
+      "tradeoff": "Cleanest pattern for QA-over-knowledge. Underpowered for open-ended tasks."
+    }
+  ],
+  "pitfalls": [
+    {
+      "id": "premature-tot",
+      "title": "Premature Tree-of-Thoughts",
+      "body": "Engineers reach for ToT because it sounds smart. The cost is brutal and 95% of tasks don't benefit. Try ReAct first; only escalate when you can demonstrate a measurable quality lift."
+    },
+    {
+      "id": "stale-plan",
+      "title": "Stale plan with no re-planning",
+      "body": "Plan-and-Execute on a dynamic task: the plan is written before any real-world signal arrives, then executed past the point it stops being valid. Add a 're-plan' branch on failure."
+    },
+    {
+      "id": "soft-reflexion-signal",
+      "title": "Reflexion with a soft signal",
+      "body": "If the success signal is 'an LLM judge thinks it's better', the loop drifts. Make signals binary (tests pass / schema matches) before you reach for Reflexion."
+    },
+    {
+      "id": "no-budget",
+      "title": "No budget",
+      "body": "Every planning strategy explodes cost. Set a hard token + dollar + wall-clock budget per task, and cancel cleanly when hit. Don't 'just one more iteration'."
+    },
+    {
+      "id": "wrong-comparator",
+      "title": "Comparing to baseline alone",
+      "body": "Reporting 'Reflexion +12% over single-shot' hides whether vanilla ReAct already got +10% for 1/10th the cost. Always include the cheap baseline."
+    }
+  ],
+  "artifact": {
+    "kind": "prompt",
+    "language": "text",
+    "content": "<!-- Planning-strategy decision fragment for an agent's system prompt -->\n\nBefore picking a strategy, answer these questions:\n\n1. Is each step small and verifiable? → ReAct.\n2. Does the task decompose into independent sub-tasks discoverable up front? → Plan-and-Execute.\n3. Is success a binary signal (test, schema, exact match)? → Reflexion on top of ReAct.\n4. Is this a search problem with branching where most paths are dead ends? → Tree-of-Thoughts.\n5. Is this a multi-hop factual question? → Self-Ask.\n\nIf two strategies seem to apply, pick the cheaper one and only escalate if it fails. Track per-strategy: token cost, wall-clock, success rate. Re-evaluate weekly."
+  }
+}

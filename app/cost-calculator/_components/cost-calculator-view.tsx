@@ -13,12 +13,8 @@ import { formatUSD } from '@/lib/utils';
 
 import { AssumptionsForm } from './assumptions-form';
 import { ComparisonMatrix } from './comparison-matrix';
-import {
-  loadSaved,
-  newId,
-  persistSaved,
-  type SavedComparison,
-} from './saved';
+import { LearnPanel } from './learn-panel';
+import { loadSaved, newId, persistSaved, type SavedComparison } from './saved';
 import { SavedSidebar } from './saved-sidebar';
 import { TemplatePicker } from './template-picker';
 
@@ -58,13 +54,24 @@ export function CostCalculatorView({ pricing, templates }: Props): React.ReactEl
   );
 
   const scored = useMemo(
-    () => scoreModels(pricing.models, assumptions).sort((a, b) => a.cost.monthlyUSD - b.cost.monthlyUSD),
+    () =>
+      scoreModels(pricing.models, assumptions).sort(
+        (a, b) => a.cost.monthlyUSD - b.cost.monthlyUSD,
+      ),
     [pricing.models, assumptions],
   );
 
   const handleExportCSV = useCallback(() => {
     const rows: ReadonlyArray<ReadonlyArray<unknown>> = [
-      ['Provider', 'Model', 'Monthly cost (USD)', 'Per-request (USD)', 'p50 latency (ms)', 'Privacy', 'Context window'],
+      [
+        'Provider',
+        'Model',
+        'Monthly cost (USD)',
+        'Per-request (USD)',
+        'p50 latency (ms)',
+        'Privacy',
+        'Context window',
+      ],
       ...scored.map(({ model, cost }) => [
         PROVIDER_LABELS[model.provider],
         model.modelLabel,
@@ -159,7 +166,10 @@ export function CostCalculatorView({ pricing, templates }: Props): React.ReactEl
               <Button
                 size="sm"
                 onClick={() => {
-                  const name = window.prompt('Name this comparison', `${templateId} · ${new Date().toLocaleDateString()}`);
+                  const name = window.prompt(
+                    'Name this comparison',
+                    `${templateId} · ${new Date().toLocaleDateString()}`,
+                  );
                   if (name) handleSave(name.trim());
                 }}
               >
@@ -172,13 +182,14 @@ export function CostCalculatorView({ pricing, templates }: Props): React.ReactEl
             {cheapest && onDevice && cheapest.model.provider !== 'on-device' && (
               <p className="mt-4 text-xs text-muted-foreground">
                 Cheapest cloud option: <strong>{cheapest.model.modelLabel}</strong> at{' '}
-                {formatUSD(monthlyMin)} / mo. On-device alternative (
-                {onDevice.model.modelLabel}) is free at the margin — privacy and quality
-                tradeoff to weigh.
+                {formatUSD(monthlyMin)} / mo. On-device alternative ({onDevice.model.modelLabel}) is
+                free at the margin — privacy and quality tradeoff to weigh.
               </p>
             )}
           </CardContent>
         </Card>
+
+        <LearnPanel />
       </div>
 
       <SavedSidebar saved={saved} onRestore={handleRestore} onDelete={handleDelete} />

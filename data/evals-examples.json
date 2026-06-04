@@ -1,0 +1,95 @@
+{
+  "moduleId": "evals",
+  "moduleLabel": "Agent Evals & Observability",
+  "intro": "Agent evals are not LLM evals. A correct final answer can ride on a chaotic, expensive, unsafe trajectory. You measure trajectory, not just outcome — task success, tool-call accuracy, step efficiency, cost-per-task, safety violations, robustness to retries. Pair with OpenTelemetry-style observability for runtime visibility.",
+  "items": [
+    {
+      "id": "task-success",
+      "title": "Task success",
+      "whenToUse": "The outcome metric. Did the agent achieve the goal?",
+      "mechanism": "Programmatic checks where possible (tests pass, schema matches, exact string). LLM-judge with rubric where not. Calibrate the judge on a human-labeled subset.",
+      "tradeoff": "The only metric stakeholders care about. The most expensive to measure rigorously."
+    },
+    {
+      "id": "trajectory-quality",
+      "title": "Trajectory quality",
+      "whenToUse": "Beyond outcome: was the path good? Two agents may both succeed; one took 3 steps, the other 30.",
+      "mechanism": "Trajectory similarity to a reference (Levenshtein over tool-call sequences), intermediate-state checks, LLM-judge on per-step decisions ('would an expert have taken this step?').",
+      "tradeoff": "Catches expensive-but-correct behavior and lucky-but-wrong behavior. Hardest to design rubrics for."
+    },
+    {
+      "id": "tool-call-accuracy",
+      "title": "Tool-call accuracy",
+      "whenToUse": "Specifically scoring whether the right tool was called with the right args.",
+      "mechanism": "Per-step: did the model pick from the right candidate set? Were args schema-valid? Were args semantically correct (e.g. right city looked up)?",
+      "tradeoff": "Cheap to compute on a labeled set. Surfaces bad tool design as much as bad model choice."
+    },
+    {
+      "id": "step-efficiency",
+      "title": "Step efficiency & cost",
+      "whenToUse": "Operational metric. Track per-task: steps taken, tokens in/out, dollars, wall-clock.",
+      "mechanism": "Aggregate per-task from the trace. Compute percentiles (p50, p90, p99). Alert on regressions.",
+      "tradeoff": "The metric most directly tied to whether you can ship the agent."
+    },
+    {
+      "id": "safety-violations",
+      "title": "Safety & policy violations",
+      "whenToUse": "Whenever the agent has any write tool or user-facing output.",
+      "mechanism": "Programmatic checks for forbidden actions (writes outside allowlist, PII in output). LLM-judge for policy adherence (tone, jailbreak resistance).",
+      "tradeoff": "Compounds with task-success: an answer that violates policy is a failure regardless of correctness."
+    },
+    {
+      "id": "robustness",
+      "title": "Robustness to retries",
+      "whenToUse": "Run the same task N times; how often does it succeed?",
+      "mechanism": "k-shot pass rate, variance across seeds. Catches agents that succeed on average but flake on individual runs.",
+      "tradeoff": "Reveals temperament. Flaky agents are unshippable even at 90% mean success."
+    },
+    {
+      "id": "llm-judge-calibration",
+      "title": "LLM-as-judge — calibrated",
+      "whenToUse": "When programmatic checks aren't possible.",
+      "mechanism": "Rubric-driven scoring, low-temperature judge model, two judges with disagreement resolution. Calibrate against human labels on a held-out set. Watch for self-preference (judge prefers its own model family).",
+      "tradeoff": "Cheap and scalable, but it lies in predictable ways. Always validate the judge before trusting it."
+    },
+    {
+      "id": "observability",
+      "title": "Runtime observability",
+      "whenToUse": "Production. Always.",
+      "mechanism": "OpenTelemetry GenAI semantic conventions: spans per agent, per tool, per LLM call. Attributes: tokens, latency, cost. Sinks: Langfuse, LangSmith, Braintrust, Arize, Phoenix, or DIY.",
+      "tradeoff": "Pays for itself the first incident. Skipping it = flying blind."
+    }
+  ],
+  "pitfalls": [
+    {
+      "id": "outcome-only",
+      "title": "Outcome-only evals",
+      "body": "If you only measure final-answer accuracy, you can't tell a 30-step correct trajectory from a 3-step one. Both metrics matter; the latter is operationally fatal."
+    },
+    {
+      "id": "judge-self-preference",
+      "title": "Judge self-preference",
+      "body": "An LLM judge will rate its own model family higher. Use a different model family as judge, or use two judges of different families and require agreement."
+    },
+    {
+      "id": "tiny-eval-set",
+      "title": "Eval set of 10 examples",
+      "body": "Statistically meaningless. Minimum 50 for tracking trends, 200+ for shipping decisions. Stratify by sub-task."
+    },
+    {
+      "id": "no-regression-gate",
+      "title": "Evals not gating deploy",
+      "body": "Evals you don't run before deploy are documentation, not safety. Wire them into CI; fail the deploy on regression."
+    },
+    {
+      "id": "leaky-eval",
+      "title": "Eval set in training data",
+      "body": "If your model was trained on the eval, the score is meaningless. Hold out a private set and refresh quarterly."
+    }
+  ],
+  "artifact": {
+    "kind": "code",
+    "language": "typescript",
+    "content": "// Eval harness: one task case = (input, reference, scorers). Run, score, aggregate.\nexport interface EvalCase {\n  id: string;\n  input: string;\n  reference?: unknown;\n  scorers: ('task_success' | 'tool_accuracy' | 'cost' | 'safety' | 'trajectory_similarity')[];\n}\n\nexport interface EvalResult {\n  caseId: string;\n  scores: Record<string, number>;\n  trace: { steps: number; tokensIn: number; tokensOut: number; ms: number };\n  pass: boolean;\n}\n\nexport async function runEvalSet(\n  cases: EvalCase[],\n  runAgent: (input: string) => Promise<{ final: string; trajectory: unknown[]; usage: { in: number; out: number; ms: number } }>,\n  scorers: Record<string, (case_: EvalCase, run: Awaited<ReturnType<typeof runAgent>>) => Promise<number>>,\n  threshold = 0.7,\n): Promise<{ results: EvalResult[]; summary: Record<string, number> }> {\n  const results: EvalResult[] = [];\n  for (const c of cases) {\n    const run = await runAgent(c.input);\n    const scores: Record<string, number> = {};\n    for (const name of c.scorers) scores[name] = await scorers[name](c, run);\n    const avg = Object.values(scores).reduce((a, b) => a + b, 0) / Object.values(scores).length;\n    results.push({\n      caseId: c.id,\n      scores,\n      trace: { steps: run.trajectory.length, tokensIn: run.usage.in, tokensOut: run.usage.out, ms: run.usage.ms },\n      pass: avg >= threshold,\n    });\n  }\n  const summary = {\n    passRate: results.filter(r => r.pass).length / results.length,\n    p50Steps: percentile(results.map(r => r.trace.steps), 0.5),\n    p90Cost: percentile(results.map(r => r.trace.tokensIn + r.trace.tokensOut), 0.9),\n  };\n  return { results, summary };\n}\n\nfunction percentile(xs: number[], q: number) {\n  const sorted = [...xs].sort((a, b) => a - b);\n  return sorted[Math.floor(sorted.length * q)] ?? 0;\n}"
+  }
+}
